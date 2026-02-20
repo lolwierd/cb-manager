@@ -15,6 +15,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Updated release workflow to run on `macos-26` and pinned latest action versions.
+- Raised project/package minimum target to macOS 26 (`swift-tools-version: 6.2`, `.macOS(.v26)`).
+- Updated app bundle packaging scripts to set `LSMinimumSystemVersion` to `26.0`.
 - Updated `scripts/install.sh` to reuse the shared app bundle build script.
 
 ## [0.1.0] - 2026-02-20

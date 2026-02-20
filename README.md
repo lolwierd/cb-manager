@@ -2,6 +2,8 @@
 
 Native macOS menu bar clipboard manager with a Spotlight-style overlay.
 
+> Minimum supported OS: **macOS 26**.
+
 ## Features
 
 - Menu bar utility (no regular Dock app window)

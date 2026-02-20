@@ -14,6 +14,7 @@ Core loop:
 ## Tech stack
 
 - Swift + SwiftUI + AppKit (menu bar utility, custom panels)
+- Minimum deployment target: macOS 26
 - Carbon hotkeys
 - SQLite (`sqlite3`) for persistence
 - Vision for OCR on images
