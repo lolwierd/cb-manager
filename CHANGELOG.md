@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-02-20
+
 ### Changed
 
 - Improved clipboard text classification so plain multiline text is less likely to be mislabeled as code.
