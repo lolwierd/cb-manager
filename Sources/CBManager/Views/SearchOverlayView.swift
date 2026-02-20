@@ -47,7 +47,8 @@ struct SearchOverlayView: View {
 
         VStack(spacing: 0) {
             searchHeader
-                .padding(18)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
 
             Divider().overlay(.white.opacity(0.12))
 
@@ -112,27 +113,29 @@ struct SearchOverlayView: View {
                     if let selectedEntry { onConfirm(selectedEntry) }
                 }
 
-            ZStack {
-                ProgressView()
-                    .controlSize(.small)
-                    .opacity(store.qmdSearchInProgress ? 1 : 0)
+            if store.isQMDAvailable {
+                ZStack {
+                    ProgressView()
+                        .controlSize(.small)
+                        .opacity(store.qmdSearchInProgress ? 1 : 0)
+                }
+                .frame(width: 16, height: 16)
+                .padding(.trailing, 8)
+
+                Text("QMD")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.09))
+                    )
+
+                Divider()
+                    .frame(height: 16)
+                    .padding(.horizontal, 10)
             }
-            .frame(width: 16, height: 16)
-            .padding(.trailing, 8)
-
-            Text("QMD")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(.white.opacity(0.09))
-                )
-
-            Divider()
-                .frame(height: 16)
-                .padding(.horizontal, 10)
 
             Menu {
                 ForEach(ClipboardEntry.Kind.allCases) { kind in
@@ -165,7 +168,11 @@ struct SearchOverlayView: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.white.opacity(0.12))
+                .fill(.thinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                )
         )
     }
 
@@ -211,7 +218,8 @@ struct SearchOverlayView: View {
     }
 
     private var previewPane: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 0) {
             if let selectedEntry {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
@@ -238,7 +246,7 @@ struct SearchOverlayView: View {
                     }
 
                     if selectedEntry.kind == .image {
-                        imagePreview(for: selectedEntry)
+                        imagePreview(for: selectedEntry, availableSize: geometry.size)
                     } else {
                         ScrollView {
                             Text(selectedEntry.content)
@@ -268,14 +276,16 @@ struct SearchOverlayView: View {
                 ContentUnavailableView("No clips yet", systemImage: "clipboard", description: Text("Copy something and it will appear here."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
     @ViewBuilder
-    private func imagePreview(for entry: ClipboardEntry) -> some View {
+    private func imagePreview(for entry: ClipboardEntry, availableSize: CGSize) -> some View {
         if let imagePath = entry.imagePath,
            let image = NSImage(contentsOfFile: imagePath) {
-            let isLandscape = image.size.width >= image.size.height
+            let previewHeight = adaptiveImagePreviewHeight(for: availableSize, imageSize: image.size)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -283,14 +293,17 @@ struct SearchOverlayView: View {
 
                 Image(nsImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: isLandscape ? .fill : .fit)
+                    .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .padding(isLandscape ? 0 : 8)
+                    .padding(8)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 320)
+            .frame(height: previewHeight)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+            )
 
             if entry.isOCRPending {
                 HStack(spacing: 8) {
@@ -303,13 +316,28 @@ struct SearchOverlayView: View {
         } else {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.white.opacity(0.05))
-                .frame(height: 220)
+                .frame(height: adaptiveImagePreviewHeight(for: availableSize, imageSize: nil))
                 .overlay {
                     Text("Image unavailable")
                         .font(.system(size: 12, weight: .regular, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
         }
+    }
+
+    private func adaptiveImagePreviewHeight(for availableSize: CGSize, imageSize: CGSize?) -> CGFloat {
+        let minHeight: CGFloat = 240
+        let maxHeight: CGFloat = 300
+
+        let byContainer = availableSize.height * 0.40
+        let byWidth = availableSize.width * 0.34
+        var target = min(byContainer, byWidth)
+
+        if let imageSize, imageSize.height > imageSize.width {
+            target *= 1.08
+        }
+
+        return min(max(target, minHeight), maxHeight)
     }
 
     private func applyOpenDefaults() {

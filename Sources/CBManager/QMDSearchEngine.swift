@@ -12,6 +12,11 @@ actor QMDSearchEngine {
         try? FileManager.default.createDirectory(at: docsDirectory, withIntermediateDirectories: true)
     }
 
+    func isAvailable() async -> Bool {
+        guard let output = await runQMD(["--version"]) else { return false }
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     func bootstrap(entries: [ClipboardEntry]) async {
         await ensureCollection()
         for entry in entries {

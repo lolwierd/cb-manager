@@ -80,8 +80,21 @@ This repo includes a GitHub Actions workflow: `.github/workflows/release.yml`.
 - Workflow builds release DMG and uploads assets to the matching GitHub Release:
   - `CBManager-<version>.dmg`
   - `CBManager-<version>.dmg.sha256`
+- Release notes are auto-generated from `CHANGELOG.md` using:
+  - `scripts/release-notes-from-changelog.sh`
+  - Preferred source section: `## [<version>]`
+  - Fallback source section: `## [Unreleased]`
 
 ### Typical flow
+
+1. Update `CHANGELOG.md`.
+2. (Optional) Preview notes locally:
+
+```bash
+./scripts/release-notes-from-changelog.sh 1.0.0 CHANGELOG.md /tmp/release-notes.md
+```
+
+3. Tag and push:
 
 ```bash
 git tag -a v1.0.0 -m "v1.0.0"
@@ -91,7 +104,7 @@ git push origin main --tags
 If the release does not exist yet, create it first:
 
 ```bash
-gh release create v1.0.0 --title "v1.0.0" --notes "See CHANGELOG.md"
+gh release create v1.0.0 --title "v1.0.0" --notes "placeholder"
 ```
 
 ## Gatekeeper / unsigned app note (`xattr`)
@@ -123,6 +136,7 @@ Current usage:
 - `qmd search` + `qmd vsearch` augment fuzzy results
 
 QMD must be available in `PATH`.
+The `QMD` badge in search bar is shown only when QMD is detected.
 
 ## Troubleshooting
 

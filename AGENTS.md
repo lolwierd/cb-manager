@@ -38,6 +38,9 @@ swift run
 swift test
 ./scripts/reload-dev.sh
 ./scripts/install.sh
+./scripts/build-app.sh 1.0.0
+./scripts/build-dmg.sh 1.0.0
+./scripts/release-notes-from-changelog.sh 1.0.0 CHANGELOG.md /tmp/release-notes.md
 ```
 
 ## Architecture map
@@ -110,6 +113,9 @@ When touching search, keyboard handling, preview, or persistence:
 
 - Keep `CHANGELOG.md` updated.
 - Add new changes under `## [Unreleased]`.
+- Before tagging a release, either:
+  - move relevant notes into `## [<version>]`, or
+  - keep them in `Unreleased` (workflow will fallback to it).
 - Do not rewrite historical released sections.
 
 ## If you add/modify features

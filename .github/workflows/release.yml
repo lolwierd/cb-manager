@@ -16,16 +16,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Build DMG
+      - name: Build DMG and release notes
         run: |
           chmod +x scripts/*.sh
           VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/build-dmg.sh "$VERSION"
+          ./scripts/release-notes-from-changelog.sh "$VERSION" CHANGELOG.md dist/release-notes.md
           shasum -a 256 "dist/CBManager-${VERSION}.dmg" > "dist/CBManager-${VERSION}.dmg.sha256"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2.5.0
         with:
+          body_path: dist/release-notes.md
           files: |
             dist/*.dmg
             dist/*.dmg.sha256

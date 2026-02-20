@@ -91,6 +91,7 @@ final class ClipboardStore: ObservableObject {
     @Published var query = "" { didSet { scheduleQMDSearch() } }
     @Published var selectedFilter: ClipboardEntry.Kind = .all
     @Published private(set) var qmdSearchInProgress = false
+    @Published private(set) var isQMDAvailable = false
     @Published private(set) var canUndoDelete = false
     @Published private(set) var overlayPresentedToken = UUID()
     @Published private(set) var lastRestoredEntryID: String?
@@ -131,7 +132,14 @@ final class ClipboardStore: ObservableObject {
         entries = database.loadEntries(limit: limit)
 
         let initialEntries = entries
-        Task {
+        let qmdSearch = self.qmdSearch
+        Task { [weak self, qmdSearch] in
+            let available = await qmdSearch.isAvailable()
+            await MainActor.run {
+                self?.isQMDAvailable = available
+            }
+
+            guard available else { return }
             await qmdSearch.bootstrap(entries: initialEntries)
         }
 
@@ -187,7 +195,9 @@ final class ClipboardStore: ObservableObject {
             pendingImageDeletions[imagePath] = Date().addingTimeInterval(undoWindow)
         }
 
-        Task { await qmdSearch.remove(id: removed.id) }
+        if isQMDAvailable {
+            Task { await qmdSearch.remove(id: removed.id) }
+        }
         scheduleQMDSearch()
     }
 
@@ -204,7 +214,9 @@ final class ClipboardStore: ObservableObject {
         entries.insert(snapshot.entry, at: insertIndex)
 
         database.insert(snapshot.entry)
-        Task { await qmdSearch.upsert(snapshot.entry) }
+        if isQMDAvailable {
+            Task { await qmdSearch.upsert(snapshot.entry) }
+        }
 
         if let path = snapshot.entry.imagePath {
             pendingImageDeletions.removeValue(forKey: path)
@@ -236,7 +248,9 @@ final class ClipboardStore: ObservableObject {
 
         entries.insert(newEntry, at: 0)
         database.insert(newEntry)
-        Task { await qmdSearch.upsert(newEntry) }
+        if isQMDAvailable {
+            Task { await qmdSearch.upsert(newEntry) }
+        }
 
         if newEntry.kind == .image {
             recognizeTextForImageEntry(newEntry)
@@ -251,6 +265,14 @@ final class ClipboardStore: ObservableObject {
 
         qmdKeywordTask?.cancel()
         qmdSemanticTask?.cancel()
+
+        guard isQMDAvailable else {
+            qmdResultQuery = normalizedQuery
+            qmdKeywordIDs = nil
+            qmdSemanticIDs = nil
+            qmdSearchInProgress = false
+            return
+        }
 
         guard !normalizedQuery.isEmpty else {
             qmdResultQuery = ""
@@ -365,7 +387,9 @@ final class ClipboardStore: ObservableObject {
                 try? FileManager.default.removeItem(atPath: path)
                 pendingImageDeletions.removeValue(forKey: path)
             }
-            Task { await qmdSearch.remove(id: entry.id) }
+            if isQMDAvailable {
+                Task { await qmdSearch.remove(id: entry.id) }
+            }
         }
     }
 
@@ -443,7 +467,9 @@ final class ClipboardStore: ObservableObject {
         entries[idx].isOCRPending = false
 
         database.updateOCR(id: entryID, ocrText: text, isPending: false)
-        Task { await qmdSearch.upsert(entries[idx]) }
+        if isQMDAvailable {
+            Task { await qmdSearch.upsert(entries[idx]) }
+        }
         scheduleQMDSearch()
     }
 
