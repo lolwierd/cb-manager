@@ -185,7 +185,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.hidesOnDeactivate = true
         panel.onEscape = { [weak self] in self?.hide() }
         panel.level = .statusBar

@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-02-20
+
+### Changed
+
+- Made search bar flush with the top of the overlay panel, removing the nested rounded-rect border for a cleaner Spotlight-like look.
+- Bumped search icon (16pt) and text field (16pt) for a more confident search presence.
+- Softened panel and preview border strokes (0.10 opacity, 0.5pt) for less visible chrome.
+- Enabled native window shadow on the overlay panel for better depth and separation.
+
+### Fixed
+
+- `install.sh` now reliably kills a running CBManager instance before reinstalling, with graceful shutdown + force-kill fallback.
+
+### Added
+
+- Added overlay screenshot to README.
+
 ## [0.1.6] - 2026-02-20
 
 ### Changed
@@ -87,7 +104,9 @@ All notable changes to this project are documented in this file.
 - In-app preview toggle (`⌘Y`).
 - Delete/undo workflow (`⌘D` / `⌘Z`).
 
-[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/lolwierd/cb-manager/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/lolwierd/cb-manager/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.5
 [0.1.4]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.4
 [0.1.3]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.3

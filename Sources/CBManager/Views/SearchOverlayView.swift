@@ -47,8 +47,8 @@ struct SearchOverlayView: View {
 
         VStack(spacing: 0) {
             searchHeader
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
 
             Divider().overlay(.white.opacity(0.12))
 
@@ -65,7 +65,7 @@ struct SearchOverlayView: View {
         .clipShape(panelShape)
         .overlay(
             panelShape
-                .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+                .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
         )
         .transaction { transaction in
             transaction.animation = nil
@@ -100,13 +100,13 @@ struct SearchOverlayView: View {
     private var searchHeader: some View {
         HStack(spacing: 0) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 12)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 2)
 
             TextField("Search clipboard history", text: $store.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15, weight: .regular, design: .rounded))
+                .font(.system(size: 16, weight: .regular, design: .rounded))
                 .focused($isSearchFocused)
                 .padding(.leading, 8)
                 .onSubmit {
@@ -161,15 +161,7 @@ struct SearchOverlayView: View {
             .buttonStyle(.plain)
             .padding(.trailing, 10)
         }
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.thinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(.white.opacity(0.10), lineWidth: 1)
-                )
-        )
+        .padding(.vertical, 4)
     }
 
     private var historyList: some View {

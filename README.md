@@ -4,6 +4,8 @@ Native macOS menu bar clipboard manager with a Spotlight-style overlay.
 
 > Minimum supported OS: **macOS 26**.
 
+![CBManager overlay](assets/screenshot.png)
+
 ## Features
 
 - Menu bar utility (no regular Dock app window)

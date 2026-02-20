@@ -194,7 +194,7 @@ private struct EntryPreviewView: View {
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+                        .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
                 )
         )
         .padding(10)

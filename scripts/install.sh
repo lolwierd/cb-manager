@@ -17,7 +17,20 @@ if [[ ! -d "$DIST_APP" ]]; then
 fi
 
 # Stop running app before replacing
-pkill -x CBManager 2>/dev/null || true
+if pgrep -x CBManager >/dev/null 2>&1; then
+  echo "[cb-manager] Killing running CBManager..."
+  pkill -x CBManager 2>/dev/null || true
+  # Wait up to 3s for it to exit
+  for i in $(seq 1 30); do
+    pgrep -x CBManager >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  # Force kill if still alive
+  if pgrep -x CBManager >/dev/null 2>&1; then
+    pkill -9 -x CBManager 2>/dev/null || true
+    sleep 0.2
+  fi
+fi
 
 install_bundle() {
   rm -rf "$TARGET_APP"
