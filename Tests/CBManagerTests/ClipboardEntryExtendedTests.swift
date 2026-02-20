@@ -236,9 +236,10 @@ final class ClipboardEntryExtendedTests: XCTestCase {
     // MARK: - Hashable / Identifiable
 
     func testEntryIsHashable() {
-        let a = makeEntry(id: "1", content: "hello", kind: .text)
-        let b = makeEntry(id: "1", content: "hello", kind: .text)
-        let c = makeEntry(id: "2", content: "hello", kind: .text)
+        let fixedDate = Date(timeIntervalSince1970: 1000)
+        let a = makeEntry(id: "1", content: "hello", kind: .text, date: fixedDate)
+        let b = makeEntry(id: "1", content: "hello", kind: .text, date: fixedDate)
+        let c = makeEntry(id: "2", content: "hello", kind: .text, date: fixedDate)
 
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c)
@@ -255,6 +256,7 @@ final class ClipboardEntryExtendedTests: XCTestCase {
         id: String = "test",
         content: String,
         kind: ClipboardEntry.Kind,
+        date: Date = Date(),
         imagePath: String? = nil,
         ocrText: String = "",
         isOCRPending: Bool = false,
@@ -263,7 +265,7 @@ final class ClipboardEntryExtendedTests: XCTestCase {
         ClipboardEntry(
             id: id,
             content: content,
-            date: Date(),
+            date: date,
             sourceApp: sourceApp,
             kind: kind,
             imagePath: imagePath,
