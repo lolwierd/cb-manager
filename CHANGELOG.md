@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-20
+
 ### Changed
 
 - Clipboard history is now unlimited (removed the hard 300-entry cap). Entries accumulate indefinitely; use the auto-prune setting to manage size by age.
