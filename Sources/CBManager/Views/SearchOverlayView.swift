@@ -477,8 +477,7 @@ struct SearchOverlayView: View {
 
         if entry.kind == .image,
            let imagePath = entry.imagePath,
-           let image = NSImage(contentsOfFile: imagePath) {
-            let size = image.size
+           let size = ThumbnailCache.imageDimensions(at: imagePath) {
             return [
                 ("Source", entry.sourceApp ?? "Unknown"),
                 ("Content type", entry.kind.rawValue),
@@ -552,12 +551,12 @@ private struct EntryRow: View {
     private var thumbnailOrIcon: some View {
         if entry.kind == .image,
            let imagePath = entry.imagePath,
-           let image = NSImage(contentsOfFile: imagePath) {
+           let thumbnail = ThumbnailCache.shared.thumbnail(for: imagePath) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(.white.opacity(0.06))
 
-                Image(nsImage: image)
+                Image(nsImage: thumbnail)
                     .resizable()
                     .scaledToFit()
                     .padding(2)

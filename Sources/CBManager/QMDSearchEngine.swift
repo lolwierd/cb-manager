@@ -30,9 +30,21 @@ actor QMDSearchEngine {
 
     func bootstrap(entries: [ClipboardEntry]) async {
         await ensureCollection()
+
+        // Only write documents that don't already exist on disk.
+        // New/updated entries are handled by upsert() at capture time.
+        var wroteAny = false
+        let fm = FileManager.default
         for entry in entries {
-            writeDocument(for: entry)
+            let file = docsDirectory.appendingPathComponent("\(entry.id).md")
+            if !fm.fileExists(atPath: file.path) {
+                writeDocument(for: entry)
+                wroteAny = true
+            }
         }
+
+        // Skip the expensive `qmd update` call if nothing changed.
+        guard wroteAny else { return }
         _ = await runQMD(["update"])
         scheduleEmbed(delay: .seconds(2))
     }
@@ -137,7 +149,9 @@ actor QMDSearchEngine {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)
-        proc.arguments = ["-ilc", "echo $PATH"]
+        // Non-interactive login shell is sufficient and ~15× faster
+        // than interactive (-ilc) which loads full shell config.
+        proc.arguments = ["-lc", "echo $PATH"]
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice

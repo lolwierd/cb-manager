@@ -7,6 +7,10 @@ All notable changes to this project are documented in this file.
 ### Changed
 
 - Improved clipboard text classification so plain multiline text is less likely to be mislabeled as code.
+- QMD bootstrap now skips writing documents that already exist on disk and skips `qmd update` when nothing changed, eliminating ~460ms of redundant I/O per launch.
+- Shell PATH resolution for QMD now uses non-interactive login shell (`-lc` instead of `-ilc`), ~15× faster.
+- Image thumbnails in the clipboard list now use `CGImageSource` to generate small thumbnails without decoding the full image, avoiding multi-MB PNG loads for 30×30 icons.
+- Image dimensions in the preview metadata are now read from file headers via ImageIO instead of loading the full image.
 
 ### Fixed
 
