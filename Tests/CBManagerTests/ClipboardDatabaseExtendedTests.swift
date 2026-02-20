@@ -20,30 +20,25 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
     // MARK: - Empty database
 
     func testLoadEntriesFromEmptyDatabase() {
-        let entries = db.loadEntries(limit: 100)
+        let entries = db.loadEntries()
         XCTAssertTrue(entries.isEmpty)
     }
 
     func testDeleteFromEmptyDatabaseDoesNotCrash() {
         db.delete(id: "nonexistent")
-        XCTAssertTrue(db.loadEntries(limit: 10).isEmpty)
-    }
-
-    func testPruneEmptyDatabaseDoesNotCrash() {
-        db.prune(limit: 5)
-        XCTAssertTrue(db.loadEntries(limit: 10).isEmpty)
+        XCTAssertTrue(db.loadEntries().isEmpty)
     }
 
     func testUpdateOCROnNonexistentEntryDoesNotCrash() {
         db.updateOCR(id: "nonexistent", ocrText: "test", isPending: false)
-        XCTAssertTrue(db.loadEntries(limit: 10).isEmpty)
+        XCTAssertTrue(db.loadEntries().isEmpty)
     }
 
     // MARK: - Insert and load
 
     func testInsertSingleEntry() {
         db.insert(entry(id: "a", content: "hello", kind: .text))
-        let loaded = db.loadEntries(limit: 10)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.count, 1)
         XCTAssertEqual(loaded[0].id, "a")
         XCTAssertEqual(loaded[0].content, "hello")
@@ -56,19 +51,20 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(entry(id: "mid", content: "mid", date: base.addingTimeInterval(100)))
         db.insert(entry(id: "new", content: "new", date: base.addingTimeInterval(200)))
 
-        let loaded = db.loadEntries(limit: 10)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.map(\.id), ["new", "mid", "old"])
     }
 
-    func testLoadEntriesRespectsLimit() {
+    func testLoadEntriesReturnsAll() {
         for i in 0..<10 {
             db.insert(entry(id: "\(i)", content: "entry \(i)", date: Date(timeIntervalSince1970: Double(i))))
         }
 
-        let loaded = db.loadEntries(limit: 3)
-        XCTAssertEqual(loaded.count, 3)
-        // Should be the 3 newest
-        XCTAssertEqual(loaded.map(\.id), ["9", "8", "7"])
+        let loaded = db.loadEntries()
+        XCTAssertEqual(loaded.count, 10)
+        // Ordered newest first
+        XCTAssertEqual(loaded.first?.id, "9")
+        XCTAssertEqual(loaded.last?.id, "0")
     }
 
     // MARK: - Upsert behavior (INSERT OR REPLACE)
@@ -77,7 +73,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(entry(id: "a", content: "original", date: Date(timeIntervalSince1970: 100)))
         db.insert(entry(id: "a", content: "updated", date: Date(timeIntervalSince1970: 200)))
 
-        let loaded = db.loadEntries(limit: 10)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.count, 1)
         XCTAssertEqual(loaded[0].content, "updated")
     }
@@ -90,7 +86,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             db.insert(entry(id: "kind-\(i)", content: "test", kind: kind, date: Date(timeIntervalSince1970: Double(i))))
         }
 
-        let loaded = db.loadEntries(limit: 10)
+        let loaded = db.loadEntries()
         let loadedKinds = Set(loaded.map(\.kind))
         XCTAssertEqual(loadedKinds, Set(kinds))
     }
@@ -101,7 +97,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         // fallback: `ClipboardEntry.Kind(rawValue: kindString) ?? .text`
         // We can test by inserting a valid entry and verifying.
         db.insert(entry(id: "t", content: "test", kind: .text))
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.kind, .text)
     }
 
@@ -119,13 +115,13 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isOCRPending: false
         )
         db.insert(e)
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertNil(loaded.first?.sourceApp)
     }
 
     func testNullImagePathRoundtrip() {
         db.insert(entry(id: "no-img", content: "test", kind: .text))
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertNil(loaded.first?.imagePath)
     }
 
@@ -141,7 +137,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isOCRPending: false
         )
         db.insert(e)
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.imagePath, "/tmp/test.png")
     }
 
@@ -159,7 +155,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isOCRPending: false
         )
         db.insert(e)
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.ocrText, "recognized text")
         XCTAssertEqual(loaded.first?.isOCRPending, false)
     }
@@ -176,7 +172,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isOCRPending: true
         )
         db.insert(e)
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.isOCRPending, true)
     }
 
@@ -184,7 +180,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(entry(id: "a", content: "", kind: .image))
         db.updateOCR(id: "a", ocrText: "new text", isPending: false)
 
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.ocrText, "new text")
         XCTAssertEqual(loaded.first?.isOCRPending, false)
     }
@@ -201,10 +197,10 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isOCRPending: true
         )
         db.insert(e)
-        XCTAssertTrue(db.loadEntries(limit: 1).first!.isOCRPending)
+        XCTAssertTrue(db.loadEntries().first!.isOCRPending)
 
         db.updateOCR(id: "pending", ocrText: "recognized", isPending: false)
-        let updated = db.loadEntries(limit: 1).first!
+        let updated = db.loadEntries().first!
         XCTAssertEqual(updated.ocrText, "recognized")
         XCTAssertFalse(updated.isOCRPending)
     }
@@ -225,7 +221,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isAITitlePending: false
         )
         db.insert(e)
-        let loaded = db.loadEntries(limit: 1).first!
+        let loaded = db.loadEntries().first!
         XCTAssertEqual(loaded.aiTitle, "A screenshot of a terminal window")
         XCTAssertFalse(loaded.isAITitlePending)
     }
@@ -244,10 +240,10 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
             isAITitlePending: true
         )
         db.insert(e)
-        XCTAssertTrue(db.loadEntries(limit: 1).first!.isAITitlePending)
+        XCTAssertTrue(db.loadEntries().first!.isAITitlePending)
 
         db.updateAITitle(id: "ai-pending", aiTitle: "Cat on keyboard", isPending: false)
-        let updated = db.loadEntries(limit: 1).first!
+        let updated = db.loadEntries().first!
         XCTAssertEqual(updated.aiTitle, "Cat on keyboard")
         XCTAssertFalse(updated.isAITitlePending)
     }
@@ -267,7 +263,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         XCTAssertEqual(removed.count, 2)
         XCTAssertEqual(Set(removed.map(\.id)), ["old1", "old2"])
 
-        let remaining = db.loadEntries(limit: 10)
+        let remaining = db.loadEntries()
         XCTAssertEqual(remaining.count, 1)
         XCTAssertEqual(remaining.first?.id, "new1")
     }
@@ -276,7 +272,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(entry(id: "a", content: "a", date: Date(timeIntervalSince1970: 9000)))
         let removed = db.deleteOlderThan(Date(timeIntervalSince1970: 1000))
         XCTAssertTrue(removed.isEmpty)
-        XCTAssertEqual(db.loadEntries(limit: 10).count, 1)
+        XCTAssertEqual(db.loadEntries().count, 1)
     }
 
     func testDeleteOlderThanPreservesImagePaths() {
@@ -301,14 +297,14 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(entry(id: "a", content: "a"))
         db.insert(entry(id: "b", content: "b", date: Date(timeIntervalSince1970: 200)))
         db.delete(id: "a")
-        let loaded = db.loadEntries(limit: 10)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.map(\.id), ["b"])
     }
 
     func testDeleteNonexistentIDDoesNotAffectOthers() {
         db.insert(entry(id: "a", content: "a"))
         db.delete(id: "nonexistent")
-        XCTAssertEqual(db.loadEntries(limit: 10).count, 1)
+        XCTAssertEqual(db.loadEntries().count, 1)
     }
 
     func testDeleteAllEntries() {
@@ -316,47 +312,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(entry(id: "b", content: "b", date: Date(timeIntervalSince1970: 200)))
         db.delete(id: "a")
         db.delete(id: "b")
-        XCTAssertTrue(db.loadEntries(limit: 10).isEmpty)
-    }
-
-    // MARK: - Prune
-
-    func testPruneKeepsNewestEntries() {
-        for i in 0..<5 {
-            db.insert(entry(id: "\(i)", content: "e\(i)", date: Date(timeIntervalSince1970: Double(i * 100))))
-        }
-
-        db.prune(limit: 3)
-        let loaded = db.loadEntries(limit: 10)
-        XCTAssertEqual(loaded.count, 3)
-        // Newest 3: ids 4, 3, 2
-        XCTAssertEqual(loaded.map(\.id), ["4", "3", "2"])
-    }
-
-    func testPruneWithLimitGreaterThanCountKeepsAll() {
-        db.insert(entry(id: "a", content: "a"))
-        db.insert(entry(id: "b", content: "b", date: Date(timeIntervalSince1970: 200)))
-
-        db.prune(limit: 100)
-        XCTAssertEqual(db.loadEntries(limit: 10).count, 2)
-    }
-
-    func testPruneWithLimitZeroDeletesAll() {
-        db.insert(entry(id: "a", content: "a"))
-        db.insert(entry(id: "b", content: "b", date: Date(timeIntervalSince1970: 200)))
-
-        db.prune(limit: 0)
-        XCTAssertTrue(db.loadEntries(limit: 10).isEmpty)
-    }
-
-    func testPruneWithLimitOneKeepsOnlyNewest() {
-        db.insert(entry(id: "old", content: "old", date: Date(timeIntervalSince1970: 100)))
-        db.insert(entry(id: "new", content: "new", date: Date(timeIntervalSince1970: 200)))
-
-        db.prune(limit: 1)
-        let loaded = db.loadEntries(limit: 10)
-        XCTAssertEqual(loaded.count, 1)
-        XCTAssertEqual(loaded.first?.id, "new")
+        XCTAssertTrue(db.loadEntries().isEmpty)
     }
 
     // MARK: - Date roundtrip
@@ -364,7 +320,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
     func testDatePreservation() {
         let date = Date(timeIntervalSince1970: 1706789012.5)
         db.insert(entry(id: "date-test", content: "test", date: date))
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.date.timeIntervalSince1970 ?? 0, date.timeIntervalSince1970, accuracy: 0.001)
     }
 
@@ -373,20 +329,20 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
     func testContentWithSpecialCharacters() {
         let specialContent = "Hello 'world' \"test\" `code` \\ emoji 🎉 日本語"
         db.insert(entry(id: "special", content: specialContent))
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.content, specialContent)
     }
 
     func testContentWithNewlines() {
         let multiline = "line1\nline2\nline3\n\ttabbed"
         db.insert(entry(id: "multiline", content: multiline))
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.content, multiline)
     }
 
     func testEmptyContent() {
         db.insert(entry(id: "empty", content: ""))
-        let loaded = db.loadEntries(limit: 1)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.first?.content, "")
     }
 
@@ -397,7 +353,7 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
 
         // Create a new database instance pointing to the same directory
         let db2 = ClipboardDatabase(baseDirectory: tempDir)
-        let loaded = db2.loadEntries(limit: 10)
+        let loaded = db2.loadEntries()
         XCTAssertEqual(loaded.count, 1)
         XCTAssertEqual(loaded.first?.id, "persist")
     }

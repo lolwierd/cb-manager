@@ -134,7 +134,6 @@ final class ClipboardStore: ObservableObject {
     private var pendingImageDeletions: [String: Date] = [:]
     private let undoWindow: TimeInterval = 20
 
-    private let limit = 300
     private let database = ClipboardDatabase()
     private let imageDirectory: URL
     private let qmdSearch: QMDSearchEngine
@@ -149,7 +148,7 @@ final class ClipboardStore: ObservableObject {
         self.imageDirectory = imageDirectory
         self.qmdSearch = QMDSearchEngine(baseDirectory: base)
 
-        entries = database.loadEntries(limit: limit)
+        entries = database.loadEntries()
 
         let qmdSearch = self.qmdSearch
         Task { [weak self, qmdSearch] in
@@ -282,7 +281,6 @@ final class ClipboardStore: ObservableObject {
             generateTitleForImageEntry(newEntry)
         }
 
-        pruneIfNeeded()
         scheduleQMDSearch()
     }
 
@@ -407,24 +405,6 @@ final class ClipboardStore: ObservableObject {
         }
 
         return false
-    }
-
-    private func pruneIfNeeded() {
-        guard entries.count > limit else { return }
-
-        let removed = entries.suffix(from: limit)
-        entries.removeLast(entries.count - limit)
-        database.prune(limit: limit)
-
-        for entry in removed {
-            if let path = entry.imagePath {
-                try? FileManager.default.removeItem(atPath: path)
-                pendingImageDeletions.removeValue(forKey: path)
-            }
-            if isQMDAvailable {
-                Task { await qmdSearch.remove(id: entry.id) }
-            }
-        }
     }
 
     private func captureClipboardEntry(from pasteboard: NSPasteboard) -> ClipboardEntry? {

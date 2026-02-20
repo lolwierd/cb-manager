@@ -22,19 +22,16 @@ final class ClipboardDatabase {
         sqlite3_close(db)
     }
 
-    func loadEntries(limit: Int) -> [ClipboardEntry] {
+    func loadEntries() -> [ClipboardEntry] {
         let sql = """
         SELECT id, created_at, source_app, kind, content, image_path, ocr_text, ocr_pending,
                ai_title, ai_title_pending
         FROM clipboard_entries
-        ORDER BY created_at DESC
-        LIMIT ?;
+        ORDER BY created_at DESC;
         """
 
         guard let statement = prepare(sql) else { return [] }
         defer { sqlite3_finalize(statement) }
-
-        sqlite3_bind_int(statement, 1, Int32(limit))
 
         var result: [ClipboardEntry] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -180,22 +177,6 @@ final class ClipboardDatabase {
         return removed
     }
 
-    func prune(limit: Int) {
-        let sql = """
-        DELETE FROM clipboard_entries
-        WHERE id NOT IN (
-            SELECT id FROM clipboard_entries
-            ORDER BY created_at DESC
-            LIMIT ?
-        );
-        """
-
-        guard let statement = prepare(sql) else { return }
-        defer { sqlite3_finalize(statement) }
-
-        sqlite3_bind_int(statement, 1, Int32(limit))
-        sqlite3_step(statement)
-    }
 
     private func openDatabase() {
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {

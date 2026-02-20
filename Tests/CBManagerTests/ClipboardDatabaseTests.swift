@@ -25,18 +25,15 @@ final class ClipboardDatabaseTests: XCTestCase {
         db.insert(e2)
         db.insert(e3)
 
-        let loaded = db.loadEntries(limit: 10)
+        let loaded = db.loadEntries()
         XCTAssertEqual(loaded.map(\.id), ["c", "b", "a"])
 
         db.updateOCR(id: "c", ocrText: "detected text", isPending: false)
-        let afterOCR = db.loadEntries(limit: 1)
+        let afterOCR = db.loadEntries()
         XCTAssertEqual(afterOCR.first?.ocrText, "detected text")
 
         db.delete(id: "b")
-        XCTAssertEqual(db.loadEntries(limit: 10).map(\.id), ["c", "a"])
-
-        db.prune(limit: 1)
-        XCTAssertEqual(db.loadEntries(limit: 10).map(\.id), ["c"])
+        XCTAssertEqual(db.loadEntries().map(\.id), ["c", "a"])
     }
 
     private func entry(id: String, content: String, date: Date) -> ClipboardEntry {
