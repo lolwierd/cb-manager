@@ -2,7 +2,7 @@ import Foundation
 
 enum ClipboardSearch {
     static let keywordMinimumChars = 3
-    static let semanticMinimumChars = 3
+    static let semanticMinimumChars = 5
 
     static func normalize(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

@@ -6,13 +6,24 @@ actor QMDSearchEngine {
     private var collectionEnsured = false
     private var updateTask: Task<Void, Never>?
     private var embedTask: Task<Void, Never>?
+    private var pathResolved = false
 
     init(baseDirectory: URL) {
         docsDirectory = baseDirectory.appendingPathComponent("qmd-docs", isDirectory: true)
         try? FileManager.default.createDirectory(at: docsDirectory, withIntermediateDirectories: true)
+        resolvedQMDPath = nil
+    }
+
+    /// Resolve the qmd binary path on first use (off the main thread).
+    private func resolvePathIfNeeded() {
+        guard !pathResolved else { return }
+        pathResolved = true
+        let shellPATH = Self.resolveShellPATH()
+        resolvedQMDPath = Self.findQMD(in: shellPATH)
     }
 
     func isAvailable() async -> Bool {
+        resolvePathIfNeeded()
         guard let output = await runQMD(["--version"]) else { return false }
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -118,38 +129,120 @@ actor QMDSearchEngine {
         try? content.write(to: file, atomically: true, encoding: .utf8)
     }
 
+    /// Resolve the user's full login-shell PATH (GUI apps inherit a minimal PATH).
+    /// Computed fresh each time QMDSearchEngine is created (i.e. each app launch).
+    private var resolvedQMDPath: String?
+
+    private static func resolveShellPATH() -> String {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: shell)
+        proc.arguments = ["-ilc", "echo $PATH"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let resolved = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !resolved.isEmpty {
+                return resolved
+            }
+        } catch {}
+        return ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+    }
+
+    private static func findQMD(in shellPATH: String) -> String? {
+        for dir in shellPATH.split(separator: ":").map(String.init) {
+            let candidate = "\(dir)/qmd"
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
     private func runQMD(_ arguments: [String]) async -> String? {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments = ["qmd"] + arguments
+        // Use withTaskCancellationHandler so we kill the process when the Task is cancelled.
+        let processHolder = ProcessHolder()
 
-                let outputPipe = Pipe()
-                let errorPipe = Pipe()
-                process.standardOutput = outputPipe
-                process.standardError = errorPipe
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async { [resolvedQMDPath] in
+                    let process = Process()
+                    processHolder.process = process
 
-                do {
-                    try process.run()
-                    process.waitUntilExit()
+                    if let resolved = resolvedQMDPath {
+                        process.executableURL = URL(fileURLWithPath: resolved)
+                        process.arguments = arguments
+                    } else {
+                        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                        process.arguments = ["qmd"] + arguments
+                    }
 
-                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    let outputPipe = Pipe()
+                    let errorPipe = Pipe()
+                    process.standardOutput = outputPipe
+                    process.standardError = errorPipe
 
-                    if process.terminationStatus != 0 {
-                        // Best-effort fallback: if command wrote valid JSON to stdout, caller may still parse it.
-                        if outputData.isEmpty {
-                            _ = String(data: errorData, encoding: .utf8)
+                    do {
+                        try process.run()
+                        process.waitUntilExit()
+
+                        guard process.terminationStatus != 15, // SIGTERM from cancellation
+                              process.terminationReason != .uncaughtSignal else {
                             continuation.resume(returning: nil)
                             return
                         }
-                    }
 
-                    continuation.resume(returning: String(data: outputData, encoding: .utf8))
-                } catch {
-                    continuation.resume(returning: nil)
+                        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+                        if process.terminationStatus != 0 {
+                            if outputData.isEmpty {
+                                _ = String(data: errorData, encoding: .utf8)
+                                continuation.resume(returning: nil)
+                                return
+                            }
+                        }
+
+                        continuation.resume(returning: String(data: outputData, encoding: .utf8))
+                    } catch {
+                        continuation.resume(returning: nil)
+                    }
                 }
+            }
+        } onCancel: {
+            processHolder.terminate()
+        }
+    }
+}
+
+/// Thread-safe holder so the cancellation handler can terminate a running Process.
+private final class ProcessHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _process: Process?
+    private var _cancelled = false
+
+    var process: Process? {
+        get { lock.withLock { _process } }
+        set {
+            lock.withLock {
+                _process = newValue
+                // If already cancelled before the process was assigned, kill immediately.
+                if _cancelled, let p = newValue, p.isRunning {
+                    p.terminate()
+                }
+            }
+        }
+    }
+
+    func terminate() {
+        lock.withLock {
+            _cancelled = true
+            if let p = _process, p.isRunning {
+                p.terminate()
             }
         }
     }

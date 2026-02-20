@@ -11,7 +11,7 @@ final class AppModel: ObservableObject {
     private let hotKey = GlobalHotKey()
     private let shortcutRecorder = ShortcutRecorderPanelController()
     private let statusBar = StatusBarController()
-    private lazy var panelController = OverlayPanelController(store: store)
+    private var panelController: OverlayPanelController?
 
     private let shortcutDefaultsKey = "globalShortcutV2"
     private let settingsURL: URL
@@ -52,6 +52,19 @@ final class AppModel: ObservableObject {
         }
 
         refreshStatusBarMenu()
+
+        // Prewarm the overlay panel shortly after launch so first open is instant.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.ensurePanelController()
+        }
+    }
+
+    @discardableResult
+    private func ensurePanelController() -> OverlayPanelController {
+        if let panelController { return panelController }
+        let controller = OverlayPanelController(store: store)
+        panelController = controller
+        return controller
     }
 
     func beginShortcutRecording() {
@@ -88,12 +101,12 @@ final class AppModel: ObservableObject {
     }
 
     func toggleOverlay() {
-        panelController.toggle()
+        ensurePanelController().toggle()
         refreshStatusBarMenu()
     }
 
     func showOverlay() {
-        panelController.show()
+        ensurePanelController().show()
         refreshStatusBarMenu()
     }
 

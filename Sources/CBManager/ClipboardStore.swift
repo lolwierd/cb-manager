@@ -295,7 +295,7 @@ final class ClipboardStore: ObservableObject {
         qmdSearchInProgress = true
 
         qmdKeywordTask = Task { [weak self, qmdSearch] in
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
             let ids = await qmdSearch.keywordSearchIDs(query: normalizedQuery, limit: 220)
             guard !Task.isCancelled else { return }
@@ -307,13 +307,13 @@ final class ClipboardStore: ObservableObject {
             }
         }
 
-        // Semantic pass kicks in for slightly longer queries.
+        // Semantic pass kicks in for longer queries.
         guard ClipboardSearch.shouldRunSemanticQMD(query: normalizedQuery) else {
             return
         }
 
         qmdSemanticTask = Task { [weak self, qmdSearch] in
-            try? await Task.sleep(for: .milliseconds(480))
+            try? await Task.sleep(for: .milliseconds(1200))
             guard !Task.isCancelled else { return }
             let ids = await qmdSearch.semanticSearchIDs(query: normalizedQuery, limit: 120)
             guard !Task.isCancelled else { return }

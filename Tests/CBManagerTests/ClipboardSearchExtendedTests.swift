@@ -29,8 +29,10 @@ final class ClipboardSearchExtendedTests: XCTestCase {
         XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: ""))
         XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "a"))
         XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "ab"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abc"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcd"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abc"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abcd"))
+        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcde"))
+        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcdef"))
     }
 
     func testThresholdsNormalizeBeforeCounting() {

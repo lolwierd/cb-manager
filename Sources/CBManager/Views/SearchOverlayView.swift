@@ -152,14 +152,10 @@ struct SearchOverlayView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Text(filterTitle)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-                .frame(width: 90)
+                Text(filterTitle)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 70, alignment: .trailing)
             }
             .menuStyle(.borderlessButton)
             .buttonStyle(.plain)
@@ -221,57 +217,59 @@ struct SearchOverlayView: View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 0) {
             if let selectedEntry {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Label(selectedEntry.kind.rawValue, systemImage: selectedEntry.kind.symbol)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(.white.opacity(0.12))
-                            )
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Label(selectedEntry.kind.rawValue, systemImage: selectedEntry.kind.symbol)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(.white.opacity(0.12))
+                                )
 
-                        if selectedEntry.kind == .image, selectedEntry.isOCRPending {
-                            Label("Extracting text…", systemImage: "sparkles")
-                                .font(.system(size: 11, weight: .regular, design: .rounded))
+                            if selectedEntry.kind == .image, selectedEntry.isOCRPending {
+                                Label("Extracting text…", systemImage: "sparkles")
+                                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Text(selectedEntry.date.formatted(date: .omitted, time: .shortened))
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
                                 .foregroundStyle(.secondary)
                         }
 
-                        Spacer()
-
-                        Text(selectedEntry.date.formatted(date: .omitted, time: .shortened))
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if selectedEntry.kind == .image {
-                        imagePreview(for: selectedEntry, availableSize: geometry.size)
-                    } else {
-                        ScrollView {
+                        if selectedEntry.kind == .image {
+                            imagePreview(for: selectedEntry, availableSize: geometry.size)
+                        } else {
                             Text(selectedEntry.content)
                                 .font(font(for: selectedEntry.kind))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .padding(.bottom, 20)
                         }
+
+                        Divider().overlay(.white.opacity(0.08))
+
+                        metadataSection(for: selectedEntry)
+                            .padding(.top, 6)
                     }
-
-                    Divider().overlay(.white.opacity(0.08))
-
-                    metadataSection(for: selectedEntry)
-                        .padding(.top, 6)
-
-                    Divider().overlay(.white.opacity(0.08))
-
-                    HStack {
-                        Spacer()
-                        Text("↩ Paste   •   ⌘Y Preview   •   ⌘D Delete   •   ⌘Z Undo")
-                    }
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .padding(20)
+                    .padding(.bottom, 4)
                 }
-                .padding(20)
+
+                Divider().overlay(.white.opacity(0.08))
+
+                HStack {
+                    Spacer()
+                    Text("↩ Paste   •   ⌘Y Preview   •   ⌘D Delete   •   ⌘Z Undo")
+                }
+                .font(.system(size: 12, weight: .regular, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
             } else {
                 ContentUnavailableView("No clips yet", systemImage: "clipboard", description: Text("Copy something and it will appear here."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -326,15 +324,15 @@ struct SearchOverlayView: View {
     }
 
     private func adaptiveImagePreviewHeight(for availableSize: CGSize, imageSize: CGSize?) -> CGFloat {
-        let minHeight: CGFloat = 240
-        let maxHeight: CGFloat = 300
+        let minHeight: CGFloat = 300
+        let maxHeight: CGFloat = 460
 
-        let byContainer = availableSize.height * 0.40
-        let byWidth = availableSize.width * 0.34
+        let byContainer = availableSize.height * 0.60
+        let byWidth = availableSize.width * 0.55
         var target = min(byContainer, byWidth)
 
         if let imageSize, imageSize.height > imageSize.width {
-            target *= 1.08
+            target *= 1.12
         }
 
         return min(max(target, minHeight), maxHeight)

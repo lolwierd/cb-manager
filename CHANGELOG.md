@@ -6,6 +6,24 @@ All notable changes to this project are documented in this file.
 
 - No unreleased changes yet.
 
+## [0.1.5] - 2026-02-20
+
+### Added
+
+- Added startup prewarming of the overlay panel to make first open feel instant.
+
+### Changed
+
+- Increased semantic QMD trigger threshold to 5+ characters to reduce noisy early semantic calls.
+- Tuned deferred QMD search timing to prioritize responsive fuzzy results (`keyword`: 400ms, `semantic`: 1200ms).
+- Updated preview details pane to scroll as a whole, keep shortcuts footer pinned, and improve image sizing balance.
+- Simplified the filter control label in the search bar for cleaner header layout.
+
+### Fixed
+
+- Improved `qmd` binary discovery in GUI launches by resolving the login-shell `PATH` at runtime.
+- Added cooperative cancellation for QMD subprocesses so cancelled searches terminate promptly.
+
 ## [0.1.4] - 2026-02-20
 
 ### Added
@@ -54,7 +72,8 @@ All notable changes to this project are documented in this file.
 - In-app preview toggle (`⌘Y`).
 - Delete/undo workflow (`⌘D` / `⌘Z`).
 
-[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.5
 [0.1.4]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.4
 [0.1.3]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.3
 [0.1.0]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.0

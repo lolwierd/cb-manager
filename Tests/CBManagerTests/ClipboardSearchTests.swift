@@ -6,8 +6,9 @@ final class ClipboardSearchTests: XCTestCase {
         XCTAssertEqual(ClipboardSearch.normalize("  HeLLo  "), "hello")
         XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(query: "ab"))
         XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(query: "abc"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abc"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcd"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abc"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abcd"))
+        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcde"))
     }
 
     func testFuzzyRankingPrioritizesCloserMatch() {
