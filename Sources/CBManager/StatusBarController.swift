@@ -4,6 +4,7 @@ import AppKit
 final class StatusBarController: NSObject {
     var onOpen: (() -> Void)?
     var onChangeShortcut: (() -> Void)?
+    var onSettings: (() -> Void)?
     var onQuit: (() -> Void)?
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -11,6 +12,7 @@ final class StatusBarController: NSObject {
 
     private lazy var openItem = NSMenuItem(title: "Open Clipboard", action: #selector(openFromMenu), keyEquivalent: "")
     private lazy var changeShortcutItem = NSMenuItem(title: "Change Global Shortcut…", action: #selector(changeShortcutFromMenu), keyEquivalent: "")
+    private lazy var settingsItem = NSMenuItem(title: "Settings…", action: #selector(settingsFromMenu), keyEquivalent: ",")
     private lazy var quitItem = NSMenuItem(title: "Quit", action: #selector(quitFromMenu), keyEquivalent: "q")
     private var errorItem: NSMenuItem?
 
@@ -62,11 +64,13 @@ final class StatusBarController: NSObject {
     private func setupMenu() {
         openItem.target = self
         changeShortcutItem.target = self
+        settingsItem.target = self
         quitItem.target = self
 
         menu.addItem(openItem)
         menu.addItem(.separator())
         menu.addItem(changeShortcutItem)
+        menu.addItem(settingsItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
     }
@@ -90,6 +94,10 @@ final class StatusBarController: NSObject {
 
     @objc private func changeShortcutFromMenu() {
         onChangeShortcut?()
+    }
+
+    @objc private func settingsFromMenu() {
+        onSettings?()
     }
 
     @objc private func quitFromMenu() {

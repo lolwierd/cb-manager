@@ -9,6 +9,8 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     private let alignmentGuides = AlignmentGuidesController()
     private let previewController = EntryPreviewPanelController()
 
+    var onOpenSettings: (() -> Void)?
+
     private var previousFrontmostApp: NSRunningApplication?
     private var isProgrammaticMove = false
     private var mouseUpMonitor: Any?
@@ -112,6 +114,21 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    @discardableResult
+    func closeTopPanel() -> Bool {
+        if previewController.isVisible {
+            previewController.close()
+            return true
+        }
+
+        if panel.isVisible {
+            hide()
+            return true
+        }
+
+        return false
+    }
+
     private func installMouseUpMonitor() {
         removeMouseUpMonitor()
         mouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { [weak self] event in
@@ -197,7 +214,11 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
             onConfirm: { [weak self] entry in self?.paste(entry) },
             onDelete: { [weak self] entry in self?.store.deleteEntry(entry) },
             onUndoDelete: { [weak self] in self?.store.undoDelete() },
-            onOpenPreview: { [weak self] entry in self?.openPreview(entry) }
+            onOpenPreview: { [weak self] entry in self?.openPreview(entry) },
+            onOpenSettings: { [weak self] in
+                self?.hide(restoreFocus: false)
+                self?.onOpenSettings?()
+            }
         )
 
         panel.contentView = NSHostingView(rootView: view)

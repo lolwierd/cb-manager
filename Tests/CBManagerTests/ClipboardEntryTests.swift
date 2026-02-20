@@ -19,7 +19,7 @@ final class ClipboardEntryTests: XCTestCase {
         XCTAssertTrue(entry.titleLine.hasSuffix("…"))
     }
 
-    func testImageTitleLineUsesOCRSummary() {
+    func testImageTitleLineShowsSourceNotOCR() {
         let entry = ClipboardEntry(
             id: "2",
             content: "",
@@ -31,10 +31,11 @@ final class ClipboardEntryTests: XCTestCase {
             isOCRPending: false
         )
 
-        XCTAssertEqual(entry.titleLine, "Image · Invoice #9382 due next Friday")
+        // OCR text no longer appears in titleLine — shows source app instead
+        XCTAssertEqual(entry.titleLine, "Image · Preview")
     }
 
-    func testImageTitleLinePendingState() {
+    func testImageTitleLineOCRPendingShowsSource() {
         let entry = ClipboardEntry(
             id: "3",
             content: "",
@@ -46,7 +47,97 @@ final class ClipboardEntryTests: XCTestCase {
             isOCRPending: true
         )
 
-        XCTAssertEqual(entry.titleLine, "Image · extracting text…")
+        // OCR pending state doesn't affect titleLine — shows image summary
+        XCTAssertEqual(entry.titleLine, "Image · Preview")
+    }
+
+    // MARK: - AI Title tests
+
+    func testImageTitleLinePrefersAITitle() {
+        let entry = ClipboardEntry(
+            id: "ai-1",
+            content: "",
+            date: Date(),
+            sourceApp: "Preview",
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "some ocr text",
+            isOCRPending: false,
+            aiTitle: "A cat sitting on a laptop keyboard",
+            isAITitlePending: false
+        )
+
+        XCTAssertEqual(entry.titleLine, "A cat sitting on a laptop keyboard")
+    }
+
+    func testImageTitleLineFallsBackToSummaryWhenNoAITitle() {
+        let entry = ClipboardEntry(
+            id: "ai-2",
+            content: "",
+            date: Date(),
+            sourceApp: "Preview",
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "Invoice #1234",
+            isOCRPending: false,
+            aiTitle: "",
+            isAITitlePending: false
+        )
+
+        // No AI title → image summary with source (OCR not used in title)
+        XCTAssertEqual(entry.titleLine, "Image · Preview")
+    }
+
+    func testImageTitleLineShowsSummaryWhileAITitlePending() {
+        let entry = ClipboardEntry(
+            id: "ai-3",
+            content: "",
+            date: Date(),
+            sourceApp: "Preview",
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "",
+            isOCRPending: false,
+            aiTitle: "",
+            isAITitlePending: true
+        )
+
+        // While generating, show the same summary as when AI is off
+        XCTAssertEqual(entry.titleLine, "Image · Preview")
+    }
+
+    func testImageTitleLineAITitlePendingShowsSummary() {
+        let entry = ClipboardEntry(
+            id: "ai-4",
+            content: "",
+            date: Date(),
+            sourceApp: "Preview",
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "OCR result here",
+            isOCRPending: false,
+            aiTitle: "",
+            isAITitlePending: true
+        )
+
+        XCTAssertEqual(entry.titleLine, "Image · Preview")
+    }
+
+    func testSearchableTextIncludesAITitle() {
+        let entry = ClipboardEntry(
+            id: "ai-5",
+            content: "",
+            date: Date(),
+            sourceApp: "Preview",
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "",
+            isOCRPending: false,
+            aiTitle: "Screenshot of Xcode IDE",
+            isAITitlePending: false
+        )
+
+        XCTAssertTrue(entry.searchableText.contains("screenshot of xcode ide"))
     }
 
     func testSearchHintsIncludeQueryForSQLCode() {

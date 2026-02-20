@@ -9,6 +9,8 @@ struct SearchOverlayView: View {
     let onDelete: (ClipboardEntry) -> Void
     let onUndoDelete: () -> Void
     let onOpenPreview: (ClipboardEntry) -> Void
+    var onOpenSettings: (() -> Void)?
+
 
     @State private var selectedID: ClipboardEntry.ID?
     @State private var keyMonitor: Any?
@@ -211,29 +213,6 @@ struct SearchOverlayView: View {
             if let selectedEntry {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        HStack {
-                            Label(selectedEntry.kind.rawValue, systemImage: selectedEntry.kind.symbol)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(.white.opacity(0.12))
-                                )
-
-                            if selectedEntry.kind == .image, selectedEntry.isOCRPending {
-                                Label("Extracting text…", systemImage: "sparkles")
-                                    .font(.system(size: 11, weight: .regular, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            Text(selectedEntry.date.formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: 12, weight: .regular, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        }
-
                         if selectedEntry.kind == .image {
                             imagePreview(for: selectedEntry, availableSize: geometry.size)
                         } else {
@@ -411,6 +390,10 @@ struct SearchOverlayView: View {
             guard store.canUndoDelete else { return false }
             onUndoDelete()
             return true
+        case Int(kVK_ANSI_Comma):
+            guard commandOnly else { return false }
+            onOpenSettings?()
+            return true
         case Int(kVK_Escape):
             onClose()
             return true
@@ -470,17 +453,32 @@ struct SearchOverlayView: View {
         if entry.kind == .image,
            let imagePath = entry.imagePath,
            let size = ThumbnailCache.imageDimensions(at: imagePath) {
-            return [
+            var rows: [(title: String, value: String)] = []
+
+            let trimmedTitle = entry.aiTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTitle.isEmpty {
+                rows.append(("Title", trimmedTitle))
+            } else if entry.isAITitlePending {
+                rows.append(("Title", "Generating…"))
+            }
+
+            rows += [
+                ("Type", entry.kind.rawValue),
                 ("Source", entry.sourceApp ?? "Unknown"),
-                ("Content type", entry.kind.rawValue),
                 ("Dimensions", "\(Int(size.width)) × \(Int(size.height))"),
                 ("Copied", entry.date.formatted(date: .abbreviated, time: .shortened))
             ]
+
+            if entry.isOCRPending {
+                rows.append(("OCR", "Extracting text…"))
+            }
+
+            return rows
         }
 
         return [
+            ("Type", entry.kind.rawValue),
             ("Source", entry.sourceApp ?? "Unknown"),
-            ("Content type", entry.kind.rawValue),
             ("Characters", "\(chars)"),
             ("Words", "\(words)"),
             ("Copied", entry.date.formatted(date: .abbreviated, time: .shortened))

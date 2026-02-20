@@ -130,6 +130,9 @@ actor QMDSearchEngine {
         ## Content
         \(entry.content)
 
+        ## AI Title
+        \(entry.aiTitle)
+
         ## OCR
         \(entry.ocrText)
 

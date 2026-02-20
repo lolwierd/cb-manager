@@ -209,6 +209,92 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         XCTAssertFalse(updated.isOCRPending)
     }
 
+    // MARK: - AI Title
+
+    func testAITitleFieldsRoundtrip() {
+        let e = ClipboardEntry(
+            id: "ai-title-test",
+            content: "",
+            date: Date(timeIntervalSince1970: 100),
+            sourceApp: nil,
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "",
+            isOCRPending: false,
+            aiTitle: "A screenshot of a terminal window",
+            isAITitlePending: false
+        )
+        db.insert(e)
+        let loaded = db.loadEntries(limit: 1).first!
+        XCTAssertEqual(loaded.aiTitle, "A screenshot of a terminal window")
+        XCTAssertFalse(loaded.isAITitlePending)
+    }
+
+    func testUpdateAITitleFromPendingToCompleted() {
+        let e = ClipboardEntry(
+            id: "ai-pending",
+            content: "",
+            date: Date(timeIntervalSince1970: 100),
+            sourceApp: nil,
+            kind: .image,
+            imagePath: "/tmp/x.png",
+            ocrText: "",
+            isOCRPending: false,
+            aiTitle: "",
+            isAITitlePending: true
+        )
+        db.insert(e)
+        XCTAssertTrue(db.loadEntries(limit: 1).first!.isAITitlePending)
+
+        db.updateAITitle(id: "ai-pending", aiTitle: "Cat on keyboard", isPending: false)
+        let updated = db.loadEntries(limit: 1).first!
+        XCTAssertEqual(updated.aiTitle, "Cat on keyboard")
+        XCTAssertFalse(updated.isAITitlePending)
+    }
+
+    // MARK: - Delete Older Than
+
+    func testDeleteOlderThanRemovesOldEntries() {
+        let old = Date(timeIntervalSince1970: 1000)
+        let recent = Date(timeIntervalSince1970: 9000)
+        db.insert(entry(id: "old1", content: "old", date: old))
+        db.insert(entry(id: "old2", content: "old2", date: Date(timeIntervalSince1970: 2000)))
+        db.insert(entry(id: "new1", content: "new", date: recent))
+
+        let cutoff = Date(timeIntervalSince1970: 5000)
+        let removed = db.deleteOlderThan(cutoff)
+
+        XCTAssertEqual(removed.count, 2)
+        XCTAssertEqual(Set(removed.map(\.id)), ["old1", "old2"])
+
+        let remaining = db.loadEntries(limit: 10)
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.id, "new1")
+    }
+
+    func testDeleteOlderThanReturnsEmptyWhenNothingToDelete() {
+        db.insert(entry(id: "a", content: "a", date: Date(timeIntervalSince1970: 9000)))
+        let removed = db.deleteOlderThan(Date(timeIntervalSince1970: 1000))
+        XCTAssertTrue(removed.isEmpty)
+        XCTAssertEqual(db.loadEntries(limit: 10).count, 1)
+    }
+
+    func testDeleteOlderThanPreservesImagePaths() {
+        let e = ClipboardEntry(
+            id: "img-old",
+            content: "",
+            date: Date(timeIntervalSince1970: 100),
+            sourceApp: nil,
+            kind: .image,
+            imagePath: "/tmp/old-image.png",
+            ocrText: "",
+            isOCRPending: false
+        )
+        db.insert(e)
+        let removed = db.deleteOlderThan(Date(timeIntervalSince1970: 500))
+        XCTAssertEqual(removed.first?.imagePath, "/tmp/old-image.png")
+    }
+
     // MARK: - Delete
 
     func testDeleteRemovesEntry() {

@@ -2,19 +2,20 @@ import AppKit
 import Foundation
 
 @MainActor
-final class AppModel: ObservableObject {
-    @Published private(set) var shortcut: HotKeyShortcut
-    @Published var isRecordingShortcut = false
-    @Published var shortcutError: String?
+final class AppModel {
+    private(set) var shortcut: HotKeyShortcut
+    private var isRecordingShortcut = false
+    private var shortcutError: String?
 
     let store = ClipboardStore()
     private let hotKey = GlobalHotKey()
     private let shortcutRecorder = ShortcutRecorderPanelController()
     private let statusBar = StatusBarController()
     private var panelController: OverlayPanelController?
+    private let settingsPanel = SettingsPanelController()
 
     private let shortcutDefaultsKey = "globalShortcutV2"
-    private let settingsURL: URL
+    let settingsURL: URL
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -22,7 +23,9 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         settingsURL = appSupport.appendingPathComponent("settings.json")
 
-        if let saved = Self.loadShortcutFromSettings(at: settingsURL) {
+        let loadedSettings = Self.loadSettings(at: settingsURL)
+
+        if let saved = loadedSettings?.shortcut {
             shortcut = saved
         } else if let data = UserDefaults.standard.data(forKey: shortcutDefaultsKey),
                   let migrated = try? JSONDecoder().decode(HotKeyShortcut.self, from: data) {
@@ -30,6 +33,19 @@ final class AppModel: ObservableObject {
             Self.saveShortcutToSettings(migrated, at: settingsURL)
         } else {
             shortcut = .fallback
+        }
+
+        // Configure AI image title generation from settings.
+        if let settings = loadedSettings {
+            store.configureImageTitles(
+                enabled: settings.resolvedImageTitlesEnabled,
+                model: settings.resolvedImageTitleModel
+            )
+
+            // Run auto-prune on launch if enabled.
+            if settings.resolvedAutoPruneEnabled {
+                store.pruneEntries(olderThanDays: settings.resolvedAutoPruneDays)
+            }
         }
 
         hotKey.onPressed = { [weak self] in
@@ -47,6 +63,9 @@ final class AppModel: ObservableObject {
         statusBar.onChangeShortcut = { [weak self] in
             self?.beginShortcutRecording()
         }
+        statusBar.onSettings = { [weak self] in
+            self?.openSettings()
+        }
         statusBar.onQuit = {
             NSApplication.shared.terminate(nil)
         }
@@ -63,6 +82,9 @@ final class AppModel: ObservableObject {
     private func ensurePanelController() -> OverlayPanelController {
         if let panelController { return panelController }
         let controller = OverlayPanelController(store: store)
+        controller.onOpenSettings = { [weak self] in
+            self?.openSettings()
+        }
         panelController = controller
         return controller
     }
@@ -110,6 +132,26 @@ final class AppModel: ObservableObject {
         refreshStatusBarMenu()
     }
 
+    func openSettings() {
+        settingsPanel.show(settingsURL: settingsURL) { [weak self] snapshot in
+            self?.store.configureImageTitles(enabled: snapshot.imageTitlesEnabled, model: snapshot.imageTitleModel)
+        }
+    }
+
+    @discardableResult
+    func handleCloseWindowCommand() -> Bool {
+        if settingsPanel.isVisible {
+            settingsPanel.close()
+            return true
+        }
+
+        if panelController?.closeTopPanel() == true {
+            return true
+        }
+
+        return false
+    }
+
     private func refreshStatusBarMenu() {
         statusBar.update(
             openTitle: "Toggle Clipboard (\(shortcut.title))",
@@ -118,21 +160,64 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private static func loadShortcutFromSettings(at url: URL) -> HotKeyShortcut? {
+    static func loadSettings(at url: URL) -> AppSettings? {
         guard let data = try? Data(contentsOf: url),
               let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
             return nil
         }
-        return settings.shortcut
+        return settings
+    }
+
+    private static func loadShortcutFromSettings(at url: URL) -> HotKeyShortcut? {
+        return loadSettings(at: url)?.shortcut
+    }
+
+    static func saveSettings(_ settings: AppSettings, at url: URL) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(settings) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     private static func saveShortcutToSettings(_ shortcut: HotKeyShortcut, at url: URL) {
-        let settings = AppSettings(shortcut: shortcut)
-        guard let data = try? JSONEncoder().encode(settings) else { return }
-        try? data.write(to: url, options: .atomic)
+        var settings = loadSettings(at: url) ?? AppSettings(shortcut: nil)
+        settings = AppSettings(
+            shortcut: shortcut,
+            imageTitleModel: settings.imageTitleModel,
+            imageTitlesEnabled: settings.imageTitlesEnabled,
+            autoPruneEnabled: settings.autoPruneEnabled,
+            autoPruneDays: settings.autoPruneDays
+        )
+        saveSettings(settings, at: url)
     }
 }
 
-private struct AppSettings: Codable {
-    let shortcut: HotKeyShortcut
+struct AppSettings: Codable {
+    let shortcut: HotKeyShortcut?
+    var imageTitleModel: String?
+    var imageTitlesEnabled: Bool?
+    var autoPruneEnabled: Bool?
+    var autoPruneDays: Int?
+
+    /// The model used for AI image title generation.
+    var resolvedImageTitleModel: String {
+        let custom = imageTitleModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return custom.isEmpty ? ImageTitleGenerator.defaultModel : custom
+    }
+
+    /// Whether AI image titles are enabled (defaults to true).
+    var resolvedImageTitlesEnabled: Bool {
+        imageTitlesEnabled ?? true
+    }
+
+    /// Whether auto-pruning old entries is enabled (defaults to false).
+    var resolvedAutoPruneEnabled: Bool {
+        autoPruneEnabled ?? false
+    }
+
+    /// Number of days after which entries are auto-pruned (defaults to 90).
+    var resolvedAutoPruneDays: Int {
+        let days = autoPruneDays ?? 90
+        return max(days, 1)
+    }
 }

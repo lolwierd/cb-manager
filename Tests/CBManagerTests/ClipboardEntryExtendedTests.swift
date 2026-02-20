@@ -30,30 +30,32 @@ final class ClipboardEntryExtendedTests: XCTestCase {
 
     func testTitleLineForImageWithNoOCRNotPending() {
         let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: "", isOCRPending: false)
+        // Fallback shows "Image · <source>" (no OCR in title)
+        XCTAssertEqual(entry.titleLine, "Image · Test")
+    }
+
+    func testTitleLineForImageShowsSourceNotOCR() {
+        let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: "Hello World", isOCRPending: false)
+        // OCR text is NOT used in titleLine — only AI title or image summary
+        XCTAssertEqual(entry.titleLine, "Image · Test")
+    }
+
+    func testTitleLineForImageWithoutSourceApp() {
+        let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: "Hello World", isOCRPending: false, sourceApp: nil)
+        // No source app → just "Image" (plus dimensions if available)
         XCTAssertEqual(entry.titleLine, "Image")
     }
 
-    func testTitleLineForImageWithOCRText() {
-        let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: "Hello World", isOCRPending: false)
-        XCTAssertEqual(entry.titleLine, "Image · Hello World")
-    }
-
-    func testTitleLineForImageWithLongOCRTruncates() {
-        let longOCR = String(repeating: "x", count: 200)
-        let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: longOCR, isOCRPending: false)
-        XCTAssertTrue(entry.titleLine.hasPrefix("Image · "))
-        XCTAssertTrue(entry.titleLine.hasSuffix("…"))
-    }
-
     func testTitleLineForImagePending() {
+        // OCR pending doesn't affect title — only AI title pending does
         let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: "", isOCRPending: true)
-        XCTAssertEqual(entry.titleLine, "Image · extracting text…")
+        XCTAssertEqual(entry.titleLine, "Image · Test")
     }
 
     func testTitleLineForImageWithOCRAndPending() {
-        // If OCR text exists, it should use it even if pending (edge case)
+        // OCR text is not used in titleLine, source app is shown instead
         let entry = makeEntry(content: "", kind: .image, imagePath: "/tmp/x.png", ocrText: "detected", isOCRPending: true)
-        XCTAssertEqual(entry.titleLine, "Image · detected")
+        XCTAssertEqual(entry.titleLine, "Image · Test")
     }
 
     func testTitleLineForCodeKind() {

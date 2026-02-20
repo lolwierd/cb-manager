@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-20
+
+### Added
+
+- AI-powered image titles: clipboard images now get automatic one-sentence descriptions generated via the `pi` CLI (default model: `openai-codex/gpt-5.1-codex-mini`).
+- Settings screen accessible from the menu bar (⌘, or right-click → Settings…) with two sections: AI Image Titles and History auto-pruning.
+- AI title shown in the image preview "Information" section alongside source, dimensions, and timestamp.
+- AI titles are preferred over OCR text in the overlay list for cleaner, more descriptive image entries.
+- AI titles are indexed by QMD for better search relevance on image entries.
+- Auto-prune setting: optionally delete entries older than N days (default 90, off by default). Pruning runs on each app launch.
+- `⌘,` opens settings from the overlay panel.
+- `⌘W` closes the settings window.
+
+### Changed
+
+- Replaced SwiftUI `App`/`Scene` entry point with a pure AppKit `NSApplication` + `AppDelegate` bootstrap. Eliminates ghost settings window and SwiftUI scene conflicts for this menu-bar-only app.
+- Image title fallback no longer shows OCR text — instead shows compact summary with dimensions and source app (e.g. "Image (1920×1080) · Preview").
+- While AI title is generating, image entries show the compact summary instead of "generating title…".
+- Moved entry type badge and timestamp from the preview pane header into the Information metadata section for a cleaner content-first preview layout.
+- Renamed "Content type" to "Type" in the metadata section for brevity.
+
 ## [0.1.7] - 2026-02-20
 
 ### Changed

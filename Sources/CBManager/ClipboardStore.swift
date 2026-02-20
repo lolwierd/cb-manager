@@ -32,18 +32,36 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     let imagePath: String?
     var ocrText: String
     var isOCRPending: Bool
+    var aiTitle: String = ""
+    var isAITitlePending: Bool = false
 
     var titleLine: String {
         switch kind {
         case .image:
-            let trimmedOCR = ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedOCR.isEmpty {
-                return "Image · \(Self.compactLine(trimmedOCR, limit: 70))"
+            let trimmedTitle = aiTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTitle.isEmpty {
+                return Self.compactLine(trimmedTitle, limit: 90)
             }
-            return isOCRPending ? "Image · extracting text…" : "Image"
+            if isAITitlePending {
+                return imageSummary
+            }
+            return imageSummary
         default:
             return Self.compactLine(content, limit: 96)
         }
+    }
+
+    /// Compact fallback summary for images: dimensions + source.
+    private var imageSummary: String {
+        var parts: [String] = ["Image"]
+        if let path = imagePath,
+           let size = ThumbnailCache.imageDimensions(at: path) {
+            parts.append("(\(Int(size.width))×\(Int(size.height)))")
+        }
+        if let app = sourceApp, !app.isEmpty {
+            parts.append("· \(app)")
+        }
+        return parts.joined(separator: " ")
     }
 
     var searchHints: String {
@@ -73,7 +91,7 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     }
 
     var searchableText: String {
-        [content, ocrText, sourceApp ?? "", kind.rawValue, searchHints].joined(separator: " ").lowercased()
+        [content, ocrText, aiTitle, sourceApp ?? "", kind.rawValue, searchHints].joined(separator: " ").lowercased()
     }
 
     private static func compactLine(_ text: String, limit: Int) -> String {
@@ -120,6 +138,8 @@ final class ClipboardStore: ObservableObject {
     private let database = ClipboardDatabase()
     private let imageDirectory: URL
     private let qmdSearch: QMDSearchEngine
+    private let imageTitleGenerator = ImageTitleGenerator()
+    private var imageTitlesEnabled = true
 
     init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -131,7 +151,6 @@ final class ClipboardStore: ObservableObject {
 
         entries = database.loadEntries(limit: limit)
 
-        let initialEntries = entries
         let qmdSearch = self.qmdSearch
         Task { [weak self, qmdSearch] in
             let available = await qmdSearch.isAvailable()
@@ -140,7 +159,8 @@ final class ClipboardStore: ObservableObject {
             }
 
             guard available else { return }
-            await qmdSearch.bootstrap(entries: initialEntries)
+            let bootstrapEntries = await MainActor.run { self?.entries ?? [] }
+            await qmdSearch.bootstrap(entries: bootstrapEntries)
         }
 
         startMonitoring()
@@ -259,6 +279,7 @@ final class ClipboardStore: ObservableObject {
 
         if newEntry.kind == .image {
             recognizeTextForImageEntry(newEntry)
+            generateTitleForImageEntry(newEntry)
         }
 
         pruneIfNeeded()
@@ -418,7 +439,9 @@ final class ClipboardStore: ObservableObject {
                 kind: classify(string),
                 imagePath: nil,
                 ocrText: "",
-                isOCRPending: false
+                isOCRPending: false,
+                aiTitle: "",
+                isAITitlePending: false
             )
         }
 
@@ -432,7 +455,9 @@ final class ClipboardStore: ObservableObject {
                 kind: .path,
                 imagePath: nil,
                 ocrText: "",
-                isOCRPending: false
+                isOCRPending: false,
+                aiTitle: "",
+                isAITitlePending: false
             )
         }
 
@@ -448,7 +473,9 @@ final class ClipboardStore: ObservableObject {
                 kind: .image,
                 imagePath: imagePath,
                 ocrText: "",
-                isOCRPending: true
+                isOCRPending: true,
+                aiTitle: "",
+                isAITitlePending: true
             )
         }
 
@@ -480,6 +507,72 @@ final class ClipboardStore: ObservableObject {
         entries[idx].isOCRPending = false
 
         database.updateOCR(id: entryID, ocrText: text, isPending: false)
+        if isQMDAvailable {
+            Task { await qmdSearch.upsert(entries[idx]) }
+        }
+        scheduleQMDSearch()
+    }
+
+    // MARK: - Age-based pruning
+
+    /// Delete all entries older than `days` days. Returns the count of removed entries.
+    @discardableResult
+    func pruneEntries(olderThanDays days: Int) -> Int {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .now
+        let removed = database.deleteOlderThan(cutoff)
+
+        // Remove from in-memory list.
+        let removedIDs = Set(removed.map(\.id))
+        entries.removeAll { removedIDs.contains($0.id) }
+
+        // Clean up image files and QMD docs.
+        for entry in removed {
+            if let path = entry.imagePath {
+                try? FileManager.default.removeItem(atPath: path)
+                pendingImageDeletions.removeValue(forKey: path)
+            }
+            if isQMDAvailable {
+                Task { await qmdSearch.remove(id: entry.id) }
+            }
+        }
+
+        if !removed.isEmpty {
+            scheduleQMDSearch()
+        }
+
+        return removed.count
+    }
+
+    // MARK: - AI image title generation
+
+    func configureImageTitles(enabled: Bool, model: String) {
+        imageTitlesEnabled = enabled
+        Task { await imageTitleGenerator.setModel(model) }
+    }
+
+    private func generateTitleForImageEntry(_ entry: ClipboardEntry) {
+        guard imageTitlesEnabled, let path = entry.imagePath else {
+            markAITitleCompleted(for: entry.id, title: "")
+            return
+        }
+        let entryID = entry.id
+
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let title = await self.imageTitleGenerator.generateTitle(forImageAt: path)
+            await MainActor.run {
+                self.markAITitleCompleted(for: entryID, title: title ?? "")
+            }
+        }
+    }
+
+    private func markAITitleCompleted(for entryID: String, title: String) {
+        guard let idx = entries.firstIndex(where: { $0.id == entryID }) else { return }
+
+        entries[idx].aiTitle = title
+        entries[idx].isAITitlePending = false
+
+        database.updateAITitle(id: entryID, aiTitle: title, isPending: false)
         if isQMDAvailable {
             Task { await qmdSearch.upsert(entries[idx]) }
         }
