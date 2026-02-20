@@ -85,7 +85,7 @@ actor QMDSearchEngine {
 
     private func ensureCollection() async {
         guard !collectionEnsured else { return }
-        _ = await runQMD(["collection", "add", docsDirectory.path, "--name", collectionName])
+        guard await runQMD(["collection", "add", docsDirectory.path, "--name", collectionName]) != nil else { return }
         collectionEnsured = true
     }
 
@@ -143,8 +143,8 @@ actor QMDSearchEngine {
         proc.standardError = FileHandle.nullDevice
         do {
             try proc.run()
-            proc.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
             if let resolved = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !resolved.isEmpty {
                 return resolved
@@ -182,12 +182,15 @@ actor QMDSearchEngine {
                     }
 
                     let outputPipe = Pipe()
-                    let errorPipe = Pipe()
                     process.standardOutput = outputPipe
-                    process.standardError = errorPipe
+                    process.standardError = FileHandle.nullDevice
 
                     do {
                         try process.run()
+
+                        // Read stdout BEFORE waitUntilExit to avoid deadlock
+                        // when the child fills the pipe buffer.
+                        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
                         process.waitUntilExit()
 
                         guard process.terminationStatus != 15, // SIGTERM from cancellation
@@ -196,15 +199,9 @@ actor QMDSearchEngine {
                             return
                         }
 
-                        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-                        if process.terminationStatus != 0 {
-                            if outputData.isEmpty {
-                                _ = String(data: errorData, encoding: .utf8)
-                                continuation.resume(returning: nil)
-                                return
-                            }
+                        if process.terminationStatus != 0, outputData.isEmpty {
+                            continuation.resume(returning: nil)
+                            return
                         }
 
                         continuation.resume(returning: String(data: outputData, encoding: .utf8))

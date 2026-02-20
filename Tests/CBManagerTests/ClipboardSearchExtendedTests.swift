@@ -18,28 +18,27 @@ final class ClipboardSearchExtendedTests: XCTestCase {
     // MARK: - Threshold checks
 
     func testKeywordQMDThresholdBoundary() {
-        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(query: ""))
-        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(query: "a"))
-        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(query: "ab"))
-        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(query: "abc"))
-        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(query: "abcd"))
+        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: ""))
+        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "a"))
+        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "ab"))
+        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "abc"))
+        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "abcd"))
     }
 
     func testSemanticQMDThresholdBoundary() {
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: ""))
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "a"))
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "ab"))
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abc"))
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abcd"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcde"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcdef"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: ""))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "a"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "ab"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abc"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abcd"))
+        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abcde"))
+        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abcdef"))
     }
 
-    func testThresholdsNormalizeBeforeCounting() {
-        // "  ab  " normalizes to "ab" which is 2 chars
-        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(query: "  ab  "))
-        // "  abc  " normalizes to "abc" which is 3 chars
-        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(query: "  abc  "))
+    func testThresholdsCountPreNormalizedInput() {
+        // Callers pass already-normalized (trimmed + lowercased) queries.
+        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "ab"))
+        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "abc"))
     }
 
     // MARK: - rank: empty query returns all in order

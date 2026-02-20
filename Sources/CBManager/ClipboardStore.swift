@@ -244,7 +244,12 @@ final class ClipboardStore: ObservableObject {
         lastChangeCount = pb.changeCount
 
         guard let newEntry = captureClipboardEntry(from: pb) else { return }
-        if isDuplicateOfLatest(newEntry) { return }
+        if isDuplicateOfLatest(newEntry) {
+            if let path = newEntry.imagePath {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+            return
+        }
 
         entries.insert(newEntry, at: 0)
         database.insert(newEntry)
@@ -287,7 +292,7 @@ final class ClipboardStore: ObservableObject {
         qmdSemanticIDs = nil
 
         // Keep short queries fuzzy-only for speed.
-        guard ClipboardSearch.shouldRunKeywordQMD(query: normalizedQuery) else {
+        guard ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: normalizedQuery) else {
             qmdSearchInProgress = false
             return
         }
@@ -308,7 +313,7 @@ final class ClipboardStore: ObservableObject {
         }
 
         // Semantic pass kicks in for longer queries.
-        guard ClipboardSearch.shouldRunSemanticQMD(query: normalizedQuery) else {
+        guard ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: normalizedQuery) else {
             return
         }
 
@@ -328,7 +333,7 @@ final class ClipboardStore: ObservableObject {
 
     private func updateQMDSearchInProgress() {
         let keywordRunning = qmdKeywordTask != nil && !(qmdKeywordTask?.isCancelled ?? true) && qmdKeywordIDs == nil
-        let semanticNeeded = ClipboardSearch.shouldRunSemanticQMD(query: qmdResultQuery)
+        let semanticNeeded = ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: qmdResultQuery)
         let semanticRunning = semanticNeeded && qmdSemanticTask != nil && !(qmdSemanticTask?.isCancelled ?? true) && qmdSemanticIDs == nil
         qmdSearchInProgress = keywordRunning || semanticRunning
     }
@@ -366,9 +371,17 @@ final class ClipboardStore: ObservableObject {
         if latest.kind == .image,
            newEntry.kind == .image,
            let oldPath = latest.imagePath,
-           let newPath = newEntry.imagePath,
-           let oldData = try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
-           let newData = try? Data(contentsOf: URL(fileURLWithPath: newPath)) {
+           let newPath = newEntry.imagePath {
+            let fm = FileManager.default
+            guard let oldSize = try? fm.attributesOfItem(atPath: oldPath)[.size] as? Int,
+                  let newSize = try? fm.attributesOfItem(atPath: newPath)[.size] as? Int,
+                  oldSize == newSize else {
+                return false
+            }
+            guard let oldData = try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
+                  let newData = try? Data(contentsOf: URL(fileURLWithPath: newPath)) else {
+                return false
+            }
             return oldData == newData
         }
 
@@ -501,7 +514,7 @@ final class ClipboardStore: ObservableObject {
         }
 
         let codeHints = ["{", "}", "=>", "import ", "func ", "class ", "let ", "const ", "SELECT ", "#!/"]
-        if codeHints.contains(where: { trimmed.contains($0) }) || trimmed.contains("\n") {
+        if codeHints.contains(where: { trimmed.contains($0) }) {
             return .code
         }
 

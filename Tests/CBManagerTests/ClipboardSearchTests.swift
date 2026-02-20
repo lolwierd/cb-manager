@@ -4,11 +4,11 @@ import XCTest
 final class ClipboardSearchTests: XCTestCase {
     func testNormalizeAndThresholds() {
         XCTAssertEqual(ClipboardSearch.normalize("  HeLLo  "), "hello")
-        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(query: "ab"))
-        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(query: "abc"))
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abc"))
-        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(query: "abcd"))
-        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(query: "abcde"))
+        XCTAssertFalse(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "ab"))
+        XCTAssertTrue(ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: "abc"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abc"))
+        XCTAssertFalse(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abcd"))
+        XCTAssertTrue(ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: "abcde"))
     }
 
     func testFuzzyRankingPrioritizesCloserMatch() {

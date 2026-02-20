@@ -4,7 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Changed
+
+- Improved clipboard text classification so plain multiline text is less likely to be mislabeled as code.
+
+### Fixed
+
+- Fixed duplicate image capture handling to remove redundant image files and avoid extra storage growth.
+- Improved duplicate image detection by short-circuiting on file-size mismatch before byte comparison.
+- Fixed overlay list row interactions so double-click confirm works reliably alongside single-click selection.
+- Hardened `qmd` execution by avoiding stdout pipe deadlocks and only marking collection setup as complete after success.
 
 ## [0.1.5] - 2026-02-20
 

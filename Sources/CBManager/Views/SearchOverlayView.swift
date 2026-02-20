@@ -190,9 +190,9 @@ struct SearchOverlayView: View {
                                     .onTapGesture {
                                         selectedID = entry.id
                                     }
-                                    .onTapGesture(count: 2) {
-                                        onConfirm(entry)
-                                    }
+                                    .simultaneousGesture(
+                                        TapGesture(count: 2).onEnded { onConfirm(entry) }
+                                    )
                             }
                         }
                     }

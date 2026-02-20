@@ -8,12 +8,12 @@ enum ClipboardSearch {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    static func shouldRunKeywordQMD(query: String) -> Bool {
-        normalize(query).count >= keywordMinimumChars
+    static func shouldRunKeywordQMD(normalizedQuery: String) -> Bool {
+        normalizedQuery.count >= keywordMinimumChars
     }
 
-    static func shouldRunSemanticQMD(query: String) -> Bool {
-        normalize(query).count >= semanticMinimumChars
+    static func shouldRunSemanticQMD(normalizedQuery: String) -> Bool {
+        normalizedQuery.count >= semanticMinimumChars
     }
 
     static func rank(
