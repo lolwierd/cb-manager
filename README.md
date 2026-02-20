@@ -50,13 +50,60 @@ Logs:
 tail -f /tmp/cbmanager-dev.log
 ```
 
-## Install to /Applications (production-style)
+## Build, package, install
 
-Builds release binary, creates `CBManager.app`, installs to `/Applications`, then launches it:
+Build release app bundle into `dist/CBManager.app`:
+
+```bash
+./scripts/build-app.sh 1.0.0
+```
+
+Build DMG into `dist/CBManager-<version>.dmg`:
+
+```bash
+./scripts/build-dmg.sh 1.0.0
+```
+
+Install app to `/Applications`:
 
 ```bash
 ./scripts/install.sh
 ```
+
+## Releases (GitHub)
+
+This repo includes a GitHub Actions workflow: `.github/workflows/release.yml`.
+
+- Trigger: push a tag like `v1.0.0`
+- Workflow builds release DMG and uploads assets to the matching GitHub Release:
+  - `CBManager-<version>.dmg`
+  - `CBManager-<version>.dmg.sha256`
+
+### Typical flow
+
+```bash
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin main --tags
+```
+
+If the release does not exist yet, create it first:
+
+```bash
+gh release create v1.0.0 --title "v1.0.0" --notes "See CHANGELOG.md"
+```
+
+## Gatekeeper / unsigned app note (`xattr`)
+
+This project is unsigned (no paid Apple Developer cert/notarization).
+Downloaded apps may be quarantined by macOS.
+
+After dragging app to `/Applications`, clear quarantine:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/CBManager.app"
+```
+
+You can also right-click the app and choose **Open** once to allow launch.
 
 ## Data locations
 
@@ -80,6 +127,8 @@ QMD must be available in `PATH`.
   - Ensure `qmd` is installed and available: `which qmd`
 - **Paste doesn’t work**
   - Grant Accessibility permission to app/terminal running CBManager
+- **App won’t open after download**
+  - Use the `xattr` command above to remove quarantine
 - **Focus not returning to previous app**
   - Reopen once with global shortcut so previous-app reference is refreshed
 - **Want a clean slate**
@@ -88,6 +137,7 @@ QMD must be available in `PATH`.
     - `~/Library/Application Support/CBManager/images/`
     - `~/Library/Application Support/CBManager/qmd-docs/`
 
-## Agent/contributor notes
+## Project docs
 
-See [`AGENTS.md`](./AGENTS.md) for architecture and invariants.
+- Contributor/agent guidance: [`AGENTS.md`](./AGENTS.md)
+- Release notes/history: [`CHANGELOG.md`](./CHANGELOG.md)

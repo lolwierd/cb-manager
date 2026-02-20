@@ -21,3 +21,8 @@ DerivedData/
 
 # Logs
 *.log
+
+# Build artifacts / packaging
+/dist/
+*.dmg
+*.dmg.sha256

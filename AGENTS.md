@@ -96,8 +96,23 @@ When touching search, keyboard handling, preview, or persistence:
    - `⌘Y` open/close preview, `Esc` close preview
    - closing overlay returns focus to previous app
 
+## Releases & packaging
+
+- Build app bundle: `./scripts/build-app.sh <version>`
+- Build DMG: `./scripts/build-dmg.sh <version>`
+- Install locally: `./scripts/install.sh`
+- Tag-based GitHub release workflow: `.github/workflows/release.yml`
+  - Push tag `vX.Y.Z` to trigger DMG + checksum asset upload.
+
+## Changelog policy
+
+- Keep `CHANGELOG.md` updated.
+- Add new changes under `## [Unreleased]`.
+- Do not rewrite historical released sections.
+
 ## If you add/modify features
 
 - Update tests under `Tests/CBManagerTests`.
 - Keep `README.md` in sync with shortcuts/behavior.
+- Keep `CHANGELOG.md` updated (Unreleased section).
 - Prefer small, isolated changes to keyboard/focus code.
