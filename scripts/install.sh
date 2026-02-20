@@ -33,4 +33,6 @@ fi
 
 echo "[cb-manager] Installed: $TARGET_APP"
 echo "[cb-manager] Launching app..."
-open "$TARGET_APP"
+if ! open "$TARGET_APP"; then
+  echo "[cb-manager] Could not auto-launch app (likely headless shell/session)."
+fi

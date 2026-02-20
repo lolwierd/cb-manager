@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 - Added packaging scripts for app bundle and DMG creation:
   - `scripts/build-app.sh`
   - `scripts/build-dmg.sh`
+  - `scripts/generate-icon.sh`
+- Added app icon generation and bundling (`Resources/AppIcon.icns`).
 - Added README instructions for Gatekeeper quarantine removal (`xattr`) for unsigned builds.
 - Added troubleshooting and release workflow documentation.
 
@@ -19,6 +21,8 @@ All notable changes to this project are documented in this file.
 - Raised project/package minimum target to macOS 26 (`swift-tools-version: 6.2`, `.macOS(.v26)`).
 - Updated app bundle packaging scripts to set `LSMinimumSystemVersion` to `26.0`.
 - Updated `scripts/install.sh` to reuse the shared app bundle build script.
+- Status bar left-click now toggles overlay instead of only opening.
+- Global shortcut persistence now uses app-support settings file to survive reinstall.
 
 ## [0.1.0] - 2026-02-20
 

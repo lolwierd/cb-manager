@@ -5,6 +5,8 @@ APP_NAME="CBManager"
 BUNDLE_NAME="$APP_NAME.app"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
+RES_DIR="$ROOT_DIR/Resources"
+ICON_PATH="$RES_DIR/AppIcon.icns"
 
 VERSION="${1:-1.0.0}"
 
@@ -20,12 +22,21 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$ICON_PATH" ]]; then
+  echo "[cb-manager] App icon missing. Generating..."
+  "$ROOT_DIR/scripts/generate-icon.sh"
+fi
+
 APP_DIR="$DIST_DIR/$BUNDLE_NAME"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cp "$BIN" "$APP_DIR/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
+
+if [[ -f "$ICON_PATH" ]]; then
+  cp "$ICON_PATH" "$APP_DIR/Contents/Resources/AppIcon.icns"
+fi
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,6 +57,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <string>APPL</string>
   <key>CFBundleExecutable</key>
   <string>CBManager</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>LSMinimumSystemVersion</key>

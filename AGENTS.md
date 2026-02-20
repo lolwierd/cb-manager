@@ -28,6 +28,7 @@ Core loop:
   - SQLite DB: `~/Library/Application Support/CBManager/clipboard.sqlite`
   - Images: `~/Library/Application Support/CBManager/images/`
   - QMD docs: `~/Library/Application Support/CBManager/qmd-docs/`
+  - Settings/shortcut persistence: `~/Library/Application Support/CBManager/settings.json`
 
 ## Commands
 

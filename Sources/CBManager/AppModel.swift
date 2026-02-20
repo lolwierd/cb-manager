@@ -12,12 +12,22 @@ final class AppModel: ObservableObject {
     private let shortcutRecorder = ShortcutRecorderPanelController()
     private let statusBar = StatusBarController()
     private lazy var panelController = OverlayPanelController(store: store)
+
     private let shortcutDefaultsKey = "globalShortcutV2"
+    private let settingsURL: URL
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: shortcutDefaultsKey),
-           let saved = try? JSONDecoder().decode(HotKeyShortcut.self, from: data) {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("CBManager", isDirectory: true)
+        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        settingsURL = appSupport.appendingPathComponent("settings.json")
+
+        if let saved = Self.loadShortcutFromSettings(at: settingsURL) {
             shortcut = saved
+        } else if let data = UserDefaults.standard.data(forKey: shortcutDefaultsKey),
+                  let migrated = try? JSONDecoder().decode(HotKeyShortcut.self, from: data) {
+            shortcut = migrated
+            Self.saveShortcutToSettings(migrated, at: settingsURL)
         } else {
             shortcut = .fallback
         }
@@ -32,7 +42,7 @@ final class AppModel: ObservableObject {
         }
 
         statusBar.onOpen = { [weak self] in
-            self?.showOverlay()
+            self?.toggleOverlay()
         }
         statusBar.onChangeShortcut = { [weak self] in
             self?.beginShortcutRecording()
@@ -72,23 +82,44 @@ final class AppModel: ObservableObject {
             if let data = try? JSONEncoder().encode(captured) {
                 UserDefaults.standard.set(data, forKey: self.shortcutDefaultsKey)
             }
+            Self.saveShortcutToSettings(captured, at: self.settingsURL)
             self.refreshStatusBarMenu()
         }
     }
 
     func toggleOverlay() {
         panelController.toggle()
+        refreshStatusBarMenu()
     }
 
     func showOverlay() {
         panelController.show()
+        refreshStatusBarMenu()
     }
 
     private func refreshStatusBarMenu() {
         statusBar.update(
-            openTitle: "Open Clipboard (\(shortcut.title))",
+            openTitle: "Toggle Clipboard (\(shortcut.title))",
             isRecording: isRecordingShortcut,
             error: shortcutError
         )
     }
+
+    private static func loadShortcutFromSettings(at url: URL) -> HotKeyShortcut? {
+        guard let data = try? Data(contentsOf: url),
+              let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
+            return nil
+        }
+        return settings.shortcut
+    }
+
+    private static func saveShortcutToSettings(_ shortcut: HotKeyShortcut, at url: URL) {
+        let settings = AppSettings(shortcut: shortcut)
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+}
+
+private struct AppSettings: Codable {
+    let shortcut: HotKeyShortcut
 }

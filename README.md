@@ -112,6 +112,7 @@ You can also right-click the app and choose **Open** once to allow launch.
 - SQLite DB: `~/Library/Application Support/CBManager/clipboard.sqlite`
 - Images: `~/Library/Application Support/CBManager/images/`
 - QMD docs: `~/Library/Application Support/CBManager/qmd-docs/`
+- App settings (includes global shortcut): `~/Library/Application Support/CBManager/settings.json`
 
 ## QMD integration
 
@@ -133,11 +134,14 @@ QMD must be available in `PATH`.
   - Use the `xattr` command above to remove quarantine
 - **Focus not returning to previous app**
   - Reopen once with global shortcut so previous-app reference is refreshed
+- **Global shortcut should persist across reinstall**
+  - It is stored in `~/Library/Application Support/CBManager/settings.json`
 - **Want a clean slate**
   - Quit app, then remove:
     - `~/Library/Application Support/CBManager/clipboard.sqlite`
     - `~/Library/Application Support/CBManager/images/`
     - `~/Library/Application Support/CBManager/qmd-docs/`
+    - `~/Library/Application Support/CBManager/settings.json`
 
 ## Project docs
 
