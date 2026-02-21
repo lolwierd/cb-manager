@@ -81,6 +81,8 @@ enum ClipboardSearch {
 
     private static func subsequenceScore(_ token: String, in target: String) -> Int? {
         guard !token.isEmpty else { return nil }
+        // Optimization: if token is longer than target, fail immediately
+        if token.count > target.count { return nil }
 
         var tokenIndex = token.startIndex
         var targetIndex = target.startIndex
@@ -104,6 +106,10 @@ enum ClipboardSearch {
             }
         }
 
-        return max(1, 140 - min(gapPenalty, 120))
+        // Stricter penalty: 2 points per skipped character.
+        // Base score: 150.
+        // Threshold: 60.
+        let score = 150 - (gapPenalty * 2)
+        return score > 60 ? score : nil
     }
 }

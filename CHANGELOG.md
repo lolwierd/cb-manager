@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-21
+
+### Changed
+
+- **Stricter Fuzzy Search**: The search algorithm now penalizes scattered matches (large gaps between matched characters) and enforces a minimum quality score. This significantly reduces noise in search results, preventing irrelevant entries from appearing just because they contain the query letters widely separated.
+- Optimized search performance by failing fast when query tokens are longer than the target text.
+
 ## [0.4.0] - 2026-02-21
 
 ### Added
