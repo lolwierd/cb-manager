@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-21
+
+### Added
+
+- **Open at Login** toggle in Settings → General (uses `SMAppService`).
+- Existing clipboard entries are bumped to the top (with updated timestamp) when pasted or re-copied.
+
 ### Fixed
 
 - Pasting an entry no longer re-captures it as a new clipboard item — the existing entry is moved to the top instead.
@@ -12,11 +19,6 @@ All notable changes to this project are documented in this file.
 - Search input is no longer sluggish: filtered results are now cached and recomputed once per change instead of 4× per render cycle.
 - Removed expensive `filteredEntries.map(\.id)` comparison that ran on every SwiftUI body evaluation.
 - QMD binary is now detected when installed via nvm/fnm (shell PATH resolution uses interactive login shell).
-
-### Added
-
-- **Open at Login** toggle in Settings → General (uses `SMAppService`).
-- Existing clipboard entries are bumped to the top (with updated timestamp) when pasted or re-copied.
 
 ## [0.3.0] - 2026-02-20
 
@@ -149,7 +151,10 @@ All notable changes to this project are documented in this file.
 - In-app preview toggle (`⌘Y`).
 - Delete/undo workflow (`⌘D` / `⌘Z`).
 
-[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lolwierd/cb-manager/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/lolwierd/cb-manager/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/lolwierd/cb-manager/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/lolwierd/cb-manager/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/lolwierd/cb-manager/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/lolwierd/cb-manager/releases/tag/v0.1.5
