@@ -227,11 +227,14 @@ final class ClipboardStore: ObservableObject {
         recomputeFilteredEntries()
     }
 
-    func overlayDidOpen() {
+    func overlayDidOpen(resetSearch: Bool = true) {
         isOverlayVisible = true
         // Clear stale search state so the overlay opens instantly.
-        query = ""
-        selectedFilter = .all
+        // Skip reset when re-showing after preview dismiss.
+        if resetSearch {
+            query = ""
+            selectedFilter = .all
+        }
         overlayPresentedToken = UUID()
     }
 

@@ -32,7 +32,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    func show(captureFrontmost: Bool = true) {
+    func show(captureFrontmost: Bool = true, resetSearch: Bool = true) {
         if captureFrontmost,
            let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != NSRunningApplication.current.processIdentifier {
@@ -48,7 +48,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         panel.alphaValue = 1
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
-        store.overlayDidOpen()
+        store.overlayDidOpen(resetSearch: resetSearch)
     }
 
     func hide(restoreFocus: Bool = true) {
@@ -166,7 +166,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
 
         hide(restoreFocus: false)
         previewController.toggle(entry: entry) { [weak self] in
-            self?.show(captureFrontmost: false)
+            self?.show(captureFrontmost: false, resetSearch: false)
         }
     }
 
