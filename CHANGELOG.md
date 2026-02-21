@@ -19,6 +19,13 @@ All notable changes to this project are documented in this file.
 - Search input is no longer sluggish: filtered results are now cached and recomputed once per change instead of 4× per render cycle.
 - Removed expensive `filteredEntries.map(\.id)` comparison that ran on every SwiftUI body evaluation.
 - QMD binary is now detected when installed via nvm/fnm (shell PATH resolution uses interactive login shell).
+- Closing the preview panel no longer clears the active search query.
+
+### Performance
+
+- `searchableText` is now precomputed once at entry creation and cached, eliminating per-keystroke string allocations.
+- Content truncated to 500 chars for fuzzy search indexing — matching deep into multi-MB entries was the main typing bottleneck.
+- Query input debounced by 35ms so fast typing batches into a single search pass instead of one per keystroke.
 
 ## [0.3.0] - 2026-02-20
 

@@ -35,6 +35,47 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     var aiTitle: String = ""
     var isAITitlePending: Bool = false
 
+    /// Precomputed lowercased search text. Updated via `refreshSearchableText()`
+    /// when `ocrText` or `aiTitle` change after init.
+    private(set) var searchableText: String = ""
+
+    // Custom init mirrors the memberwise init but precomputes searchableText.
+    init(
+        id: String,
+        content: String,
+        date: Date,
+        sourceApp: String?,
+        kind: Kind,
+        imagePath: String?,
+        ocrText: String,
+        isOCRPending: Bool,
+        aiTitle: String = "",
+        isAITitlePending: Bool = false
+    ) {
+        self.id = id
+        self.content = content
+        self.date = date
+        self.sourceApp = sourceApp
+        self.kind = kind
+        self.imagePath = imagePath
+        self.ocrText = ocrText
+        self.isOCRPending = isOCRPending
+        self.aiTitle = aiTitle
+        self.isAITitlePending = isAITitlePending
+        self.searchableText = Self.buildSearchableText(
+            content: content, ocrText: ocrText, aiTitle: aiTitle,
+            sourceApp: sourceApp, kind: kind
+        )
+    }
+
+    /// Call after mutating `ocrText` or `aiTitle` to keep the search cache current.
+    mutating func refreshSearchableText() {
+        searchableText = Self.buildSearchableText(
+            content: content, ocrText: ocrText, aiTitle: aiTitle,
+            sourceApp: sourceApp, kind: kind
+        )
+    }
+
     var titleLine: String {
         switch kind {
         case .image:
@@ -65,12 +106,21 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     }
 
     var searchHints: String {
+        Self.computeSearchHints(kind: kind, content: content)
+    }
+
+    /// Maximum characters of content to include in the search index.
+    /// Searching deep into a multi-MB clipboard entry is pointless for
+    /// fuzzy matching and extremely expensive.
+    private static let searchContentLimit = 500
+
+    private static func computeSearchHints(kind: Kind, content: String) -> String {
         var hints: [String] = [kind.rawValue.lowercased()]
 
         switch kind {
         case .code:
             hints += ["snippet", "command", "query"]
-            let upper = content.uppercased()
+            let upper = String(content.prefix(2000)).uppercased()
             let sqlMarkers = ["SELECT ", "FROM ", "WHERE ", "JOIN ", "INSERT ", "UPDATE ", "DELETE ", "GROUP BY", "ORDER BY"]
             if sqlMarkers.contains(where: { upper.contains($0) }) {
                 hints += ["sql", "database", "query", "postgres", "mysql"]
@@ -90,8 +140,18 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
         return hints.joined(separator: " ")
     }
 
-    var searchableText: String {
-        [content, ocrText, aiTitle, sourceApp ?? "", kind.rawValue, searchHints].joined(separator: " ").lowercased()
+    private static func buildSearchableText(
+        content: String, ocrText: String, aiTitle: String,
+        sourceApp: String?, kind: Kind
+    ) -> String {
+        // Truncate content to avoid lowercasing / matching multi-MB strings.
+        let truncatedContent = content.count > searchContentLimit
+            ? String(content.prefix(searchContentLimit))
+            : content
+        let hints = computeSearchHints(kind: kind, content: content)
+        return [truncatedContent, ocrText, aiTitle, sourceApp ?? "", kind.rawValue, hints]
+            .joined(separator: " ")
+            .lowercased()
     }
 
     private static func compactLine(_ text: String, limit: Int) -> String {
@@ -109,7 +169,7 @@ final class ClipboardStore: ObservableObject {
     @Published var query = "" {
         didSet {
             scheduleQMDSearch()
-            recomputeFilteredEntries()
+            scheduleFilterRecompute()
         }
     }
     @Published var selectedFilter: ClipboardEntry.Kind = .all {
@@ -126,6 +186,7 @@ final class ClipboardStore: ObservableObject {
 
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
+    private var filterRecomputeTask: Task<Void, Never>?
     private var qmdKeywordTask: Task<Void, Never>?
     private var qmdSemanticTask: Task<Void, Never>?
 
@@ -175,7 +236,21 @@ final class ClipboardStore: ObservableObject {
         startMonitoring()
     }
 
+    /// Debounced recompute — used by the query `didSet` so fast typing
+    /// doesn't block the main thread on every keystroke.
+    private func scheduleFilterRecompute() {
+        filterRecomputeTask?.cancel()
+        filterRecomputeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(35))
+            guard !Task.isCancelled else { return }
+            self?.recomputeFilteredEntries()
+        }
+    }
+
+    /// Immediate recompute — used by filter changes, delete, undo, etc.
+    /// Also cancels any pending debounced recompute.
     private func recomputeFilteredEntries() {
+        filterRecomputeTask?.cancel()
         filteredEntries = ClipboardSearch.rank(
             entries: entries,
             query: query,
@@ -556,6 +631,7 @@ final class ClipboardStore: ObservableObject {
 
         entries[idx].ocrText = text
         entries[idx].isOCRPending = false
+        entries[idx].refreshSearchableText()
 
         database.updateOCR(id: entryID, ocrText: text, isPending: false)
         if isQMDAvailable {
@@ -624,6 +700,7 @@ final class ClipboardStore: ObservableObject {
 
         entries[idx].aiTitle = title
         entries[idx].isAITitlePending = false
+        entries[idx].refreshSearchableText()
 
         database.updateAITitle(id: entryID, aiTitle: title, isPending: false)
         if isQMDAvailable {
