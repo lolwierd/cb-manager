@@ -145,6 +145,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     }
 
     private func paste(_ entry: ClipboardEntry) {
+        store.bumpToTop(entry)
         store.copyToClipboard(entry)
         hide(restoreFocus: false)
 

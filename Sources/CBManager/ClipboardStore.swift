@@ -106,8 +106,17 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
 @MainActor
 final class ClipboardStore: ObservableObject {
     @Published private(set) var entries: [ClipboardEntry] = []
-    @Published var query = "" { didSet { scheduleQMDSearch() } }
-    @Published var selectedFilter: ClipboardEntry.Kind = .all
+    @Published var query = "" {
+        didSet {
+            scheduleQMDSearch()
+            recomputeFilteredEntries()
+        }
+    }
+    @Published var selectedFilter: ClipboardEntry.Kind = .all {
+        didSet { recomputeFilteredEntries() }
+    }
+    @Published private(set) var filteredEntries: [ClipboardEntry] = []
+    @Published private(set) var filteredEntriesVersion: UInt = 0
     @Published private(set) var qmdSearchInProgress = false
     @Published private(set) var isQMDAvailable = false
     @Published private(set) var canUndoDelete = false
@@ -149,6 +158,7 @@ final class ClipboardStore: ObservableObject {
         self.qmdSearch = QMDSearchEngine(baseDirectory: base)
 
         entries = database.loadEntries()
+        recomputeFilteredEntries()
 
         let qmdSearch = self.qmdSearch
         Task { [weak self, qmdSearch] in
@@ -165,8 +175,8 @@ final class ClipboardStore: ObservableObject {
         startMonitoring()
     }
 
-    var filteredEntries: [ClipboardEntry] {
-        ClipboardSearch.rank(
+    private func recomputeFilteredEntries() {
+        filteredEntries = ClipboardSearch.rank(
             entries: entries,
             query: query,
             filter: selectedFilter,
@@ -174,6 +184,7 @@ final class ClipboardStore: ObservableObject {
             qmdKeywordIDs: qmdKeywordIDs,
             qmdSemanticIDs: qmdSemanticIDs
         )
+        filteredEntriesVersion &+= 1
     }
 
     func copyToClipboard(_ entry: ClipboardEntry) {
@@ -184,14 +195,43 @@ final class ClipboardStore: ObservableObject {
            let path = entry.imagePath,
            let image = NSImage(contentsOfFile: path) {
             pb.writeObjects([image])
-            return
+        } else {
+            pb.setString(entry.content, forType: .string)
         }
 
-        pb.setString(entry.content, forType: .string)
+        // Suppress the next pasteboard poll so we don't re-capture
+        // the item we just placed on the clipboard.
+        lastChangeCount = pb.changeCount
+    }
+
+    /// Move an existing entry to the top of the list (most recent).
+    func bumpToTop(_ entry: ClipboardEntry) {
+        guard let idx = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        if idx == 0 { return } // already at top
+
+        let existing = entries.remove(at: idx)
+        let updated = ClipboardEntry(
+            id: existing.id,
+            content: existing.content,
+            date: .now,
+            sourceApp: existing.sourceApp,
+            kind: existing.kind,
+            imagePath: existing.imagePath,
+            ocrText: existing.ocrText,
+            isOCRPending: existing.isOCRPending,
+            aiTitle: existing.aiTitle,
+            isAITitlePending: existing.isAITitlePending
+        )
+        entries.insert(updated, at: 0)
+        database.insert(updated) // INSERT OR REPLACE updates the date
+        recomputeFilteredEntries()
     }
 
     func overlayDidOpen() {
         isOverlayVisible = true
+        // Clear stale search state so the overlay opens instantly.
+        query = ""
+        selectedFilter = .all
         overlayPresentedToken = UUID()
     }
 
@@ -217,6 +257,7 @@ final class ClipboardStore: ObservableObject {
         if isQMDAvailable {
             Task { await qmdSearch.remove(id: removed.id) }
         }
+        recomputeFilteredEntries()
         scheduleQMDSearch()
     }
 
@@ -243,6 +284,7 @@ final class ClipboardStore: ObservableObject {
 
         lastRestoredEntryID = snapshot.entry.id
         canUndoDelete = !deletedStack.isEmpty
+        recomputeFilteredEntries()
         scheduleQMDSearch()
     }
 
@@ -263,9 +305,28 @@ final class ClipboardStore: ObservableObject {
         lastChangeCount = pb.changeCount
 
         guard let newEntry = captureClipboardEntry(from: pb) else { return }
-        if isDuplicateOfLatest(newEntry) {
+        if let existingIdx = indexOfDuplicate(newEntry) {
+            // Already have this content — move to top instead of inserting.
             if let path = newEntry.imagePath {
                 try? FileManager.default.removeItem(atPath: path)
+            }
+            if existingIdx != 0 {
+                let existing = entries.remove(at: existingIdx)
+                let bumped = ClipboardEntry(
+                    id: existing.id,
+                    content: existing.content,
+                    date: .now,
+                    sourceApp: existing.sourceApp,
+                    kind: existing.kind,
+                    imagePath: existing.imagePath,
+                    ocrText: existing.ocrText,
+                    isOCRPending: existing.isOCRPending,
+                    aiTitle: existing.aiTitle,
+                    isAITitlePending: existing.isAITitlePending
+                )
+                entries.insert(bumped, at: 0)
+                database.insert(bumped)
+                recomputeFilteredEntries()
             }
             return
         }
@@ -281,6 +342,7 @@ final class ClipboardStore: ObservableObject {
             generateTitleForImageEntry(newEntry)
         }
 
+        recomputeFilteredEntries()
         scheduleQMDSearch()
     }
 
@@ -328,6 +390,7 @@ final class ClipboardStore: ObservableObject {
                 guard let self, self.qmdResultQuery == normalizedQuery else { return }
                 self.qmdKeywordIDs = ids
                 self.updateQMDSearchInProgress()
+                self.recomputeFilteredEntries()
             }
         }
 
@@ -346,6 +409,7 @@ final class ClipboardStore: ObservableObject {
                 guard let self, self.qmdResultQuery == normalizedQuery else { return }
                 self.qmdSemanticIDs = ids
                 self.updateQMDSearchInProgress()
+                self.recomputeFilteredEntries()
             }
         }
     }
@@ -380,31 +444,35 @@ final class ClipboardStore: ObservableObject {
         }
     }
 
-    private func isDuplicateOfLatest(_ newEntry: ClipboardEntry) -> Bool {
-        guard let latest = entries.first else { return false }
-
-        if latest.kind != .image && newEntry.kind != .image {
-            return latest.kind == newEntry.kind && latest.content == newEntry.content
-        }
-
-        if latest.kind == .image,
-           newEntry.kind == .image,
-           let oldPath = latest.imagePath,
-           let newPath = newEntry.imagePath {
-            let fm = FileManager.default
-            guard let oldSize = try? fm.attributesOfItem(atPath: oldPath)[.size] as? Int,
-                  let newSize = try? fm.attributesOfItem(atPath: newPath)[.size] as? Int,
-                  oldSize == newSize else {
-                return false
+    /// Return the index of the first existing entry whose content matches
+    /// the new entry, or `nil` if no match is found. For text-based entries
+    /// we compare kind + content; for images we compare file size + bytes.
+    private func indexOfDuplicate(_ newEntry: ClipboardEntry) -> Int? {
+        for (idx, existing) in entries.enumerated() {
+            if existing.kind != .image && newEntry.kind != .image {
+                if existing.kind == newEntry.kind && existing.content == newEntry.content {
+                    return idx
+                }
+            } else if existing.kind == .image,
+                      newEntry.kind == .image,
+                      let oldPath = existing.imagePath,
+                      let newPath = newEntry.imagePath {
+                let fm = FileManager.default
+                guard let oldSize = try? fm.attributesOfItem(atPath: oldPath)[.size] as? Int,
+                      let newSize = try? fm.attributesOfItem(atPath: newPath)[.size] as? Int,
+                      oldSize == newSize else {
+                    continue
+                }
+                guard let oldData = try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
+                      let newData = try? Data(contentsOf: URL(fileURLWithPath: newPath)) else {
+                    continue
+                }
+                if oldData == newData {
+                    return idx
+                }
             }
-            guard let oldData = try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
-                  let newData = try? Data(contentsOf: URL(fileURLWithPath: newPath)) else {
-                return false
-            }
-            return oldData == newData
         }
-
-        return false
+        return nil
     }
 
     private func captureClipboardEntry(from pasteboard: NSPasteboard) -> ClipboardEntry? {
@@ -490,6 +558,7 @@ final class ClipboardStore: ObservableObject {
         if isQMDAvailable {
             Task { await qmdSearch.upsert(entries[idx]) }
         }
+        recomputeFilteredEntries()
         scheduleQMDSearch()
     }
 
@@ -517,6 +586,7 @@ final class ClipboardStore: ObservableObject {
         }
 
         if !removed.isEmpty {
+            recomputeFilteredEntries()
             scheduleQMDSearch()
         }
 
@@ -556,6 +626,7 @@ final class ClipboardStore: ObservableObject {
         if isQMDAvailable {
             Task { await qmdSearch.upsert(entries[idx]) }
         }
+        recomputeFilteredEntries()
         scheduleQMDSearch()
     }
 

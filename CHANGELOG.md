@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Pasting an entry no longer re-captures it as a new clipboard item — the existing entry is moved to the top instead.
+- Duplicate clipboard content detected anywhere in history (not just the latest entry) is moved to top rather than re-inserted.
+- Overlay now opens instantly even when the previous session had a search query (stale query and filter are cleared on open).
+- Search input is no longer sluggish: filtered results are now cached and recomputed once per change instead of 4× per render cycle.
+- Removed expensive `filteredEntries.map(\.id)` comparison that ran on every SwiftUI body evaluation.
+- QMD binary is now detected when installed via nvm/fnm (shell PATH resolution uses interactive login shell).
+
+### Added
+
+- **Open at Login** toggle in Settings → General (uses `SMAppService`).
+- Existing clipboard entries are bumped to the top (with updated timestamp) when pasted or re-copied.
+
 ## [0.3.0] - 2026-02-20
 
 ### Changed

@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -21,6 +22,7 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    generalSection
                     aiTitleSection
                     historySection
                 }
@@ -28,8 +30,58 @@ struct SettingsView: View {
                 .padding(.vertical, 20)
             }
         }
-        .frame(width: 500, height: 520)
+        .frame(width: 500, height: 580)
         .background(.ultraThickMaterial)
+    }
+
+    // MARK: - General
+
+    private var generalSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 10) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(.white.opacity(0.07))
+                    )
+
+                Text("General")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+
+                Spacer()
+            }
+
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Open at Login")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+
+                    Text("Automatically start CBManager when you log in.")
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(2)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: $settingsModel.launchAtLogin)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.white.opacity(0.06), lineWidth: 0.5)
+        )
     }
 
     // MARK: - AI Image Titles
@@ -244,6 +296,15 @@ struct SettingsView: View {
 /// View model that reads/writes settings and notifies the store on changes.
 @MainActor
 final class SettingsModel: ObservableObject {
+    @Published var launchAtLogin: Bool {
+        didSet {
+            if launchAtLogin {
+                try? SMAppService.mainApp.register()
+            } else {
+                try? SMAppService.mainApp.unregister()
+            }
+        }
+    }
     @Published var imageTitlesEnabled: Bool {
         didSet { save() }
     }
@@ -276,6 +337,8 @@ final class SettingsModel: ObservableObject {
     init(settingsURL: URL, onChanged: @escaping (SettingsSnapshot) -> Void) {
         self.settingsURL = settingsURL
         self.onChanged = onChanged
+
+        self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
         let settings = AppModel.loadSettings(at: settingsURL)
         self.imageTitlesEnabled = settings?.resolvedImageTitlesEnabled ?? true

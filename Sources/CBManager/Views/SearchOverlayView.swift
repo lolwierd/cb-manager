@@ -79,7 +79,7 @@ struct SearchOverlayView: View {
         .onDisappear {
             removeKeyMonitor()
         }
-        .onChange(of: store.filteredEntries.map(\.id)) { _, _ in
+        .onChange(of: store.filteredEntriesVersion) { _, _ in
             refreshSelection()
         }
         .onChange(of: store.overlayPresentedToken) { _, _ in

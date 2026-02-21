@@ -152,9 +152,9 @@ actor QMDSearchEngine {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: shell)
-        // Non-interactive login shell is sufficient and ~15× faster
-        // than interactive (-ilc) which loads full shell config.
-        proc.arguments = ["-lc", "echo $PATH"]
+        // Interactive login shell (-ilc) so tools installed via version
+        // managers like nvm/fnm (which initialize in .zshrc) are found.
+        proc.arguments = ["-ilc", "echo $PATH"]
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice

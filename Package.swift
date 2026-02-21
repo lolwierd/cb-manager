@@ -18,6 +18,7 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Vision"),
+                .linkedFramework("ServiceManagement"),
                 .linkedLibrary("sqlite3")
             ]
         ),
