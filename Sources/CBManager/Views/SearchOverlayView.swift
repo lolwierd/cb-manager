@@ -63,7 +63,11 @@ struct SearchOverlayView: View {
                 previewPane
             }
         }
-        .background(panelShape.fill(.ultraThinMaterial))
+        .background(
+            panelShape
+                .fill(.regularMaterial)
+                .overlay(panelShape.fill(Color.black.opacity(0.10)))
+        )
         .clipShape(panelShape)
         .overlay(
             panelShape

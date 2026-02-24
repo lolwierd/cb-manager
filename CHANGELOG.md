@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Reduced glass translucency in the overlay and preview panels (`.ultraThinMaterial` → `.regularMaterial` with subtle tint) to improve readability over bright/white backgrounds.
+
 ## [0.5.0] - 2026-02-21
 
 ### Changed
@@ -165,7 +169,7 @@ All notable changes to this project are documented in this file.
 - In-app preview toggle (`⌘Y`).
 - Delete/undo workflow (`⌘D` / `⌘Z`).
 
-[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.5.0...HEAD
 [0.4.0]: https://github.com/lolwierd/cb-manager/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lolwierd/cb-manager/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lolwierd/cb-manager/compare/v0.1.7...v0.2.0
