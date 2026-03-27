@@ -113,6 +113,9 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     /// Searching deep into a multi-MB clipboard entry is pointless for
     /// fuzzy matching and extremely expensive.
     private static let searchContentLimit = 500
+    /// Maximum characters to scan when generating a one-line list title.
+    /// The overlay only needs a compact summary, not the full payload.
+    private static let titleLineScanLimit = 512
 
     private static func computeSearchHints(kind: Kind, content: String) -> String {
         var hints: [String] = [kind.rawValue.lowercased()]
@@ -155,10 +158,18 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     }
 
     private static func compactLine(_ text: String, limit: Int) -> String {
-        let oneLine = text
+        let scanEnd = text.index(text.startIndex, offsetBy: titleLineScanLimit, limitedBy: text.endIndex) ?? text.endIndex
+        let truncatedAtSource = scanEnd != text.endIndex
+        let excerpt = String(text[..<scanEnd])
+
+        let oneLine = excerpt
+            .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard oneLine.count > limit else { return oneLine }
+        guard oneLine.count > limit else {
+            return truncatedAtSource ? oneLine + "…" : oneLine
+        }
         return String(oneLine.prefix(limit)) + "…"
     }
 }
@@ -307,8 +318,12 @@ final class ClipboardStore: ObservableObject {
         // Clear stale search state so the overlay opens instantly.
         // Skip reset when re-showing after preview dismiss.
         if resetSearch {
-            query = ""
-            selectedFilter = .all
+            if !query.isEmpty {
+                query = ""
+            }
+            if selectedFilter != .all {
+                selectedFilter = .all
+            }
         }
         overlayPresentedToken = UUID()
     }

@@ -3,6 +3,9 @@ import Carbon
 import SwiftUI
 
 struct SearchOverlayView: View {
+    private static let inlinePreviewCharacterLimit = 12_000
+    private static let metadataScanCharacterLimit = 20_000
+
     @ObservedObject var store: ClipboardStore
     let onClose: () -> Void
     let onConfirm: (ClipboardEntry) -> Void
@@ -220,10 +223,19 @@ struct SearchOverlayView: View {
                         if selectedEntry.kind == .image {
                             imagePreview(for: selectedEntry, availableSize: geometry.size)
                         } else {
-                            Text(selectedEntry.content)
-                                .font(font(for: selectedEntry.kind))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(overlayPreviewText(for: selectedEntry))
+                                    .font(font(for: selectedEntry.kind))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                if isInlinePreviewTruncated(for: selectedEntry) {
+                                    Text("Showing an excerpt here for speed. Use ⌘Y for the full preview.")
+                                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
 
                         Divider().overlay(.white.opacity(0.08))
@@ -257,18 +269,26 @@ struct SearchOverlayView: View {
     @ViewBuilder
     private func imagePreview(for entry: ClipboardEntry, availableSize: CGSize) -> some View {
         if let imagePath = entry.imagePath,
-           let image = NSImage(contentsOfFile: imagePath) {
-            let previewHeight = adaptiveImagePreviewHeight(for: availableSize, imageSize: image.size)
+           let imageSize = ThumbnailCache.imageDimensions(at: imagePath) {
+            let previewHeight = adaptiveImagePreviewHeight(for: availableSize, imageSize: imageSize)
+            let maxPixelSize = max(availableSize.width, availableSize.height) * 2
+            let previewImage = ThumbnailCache.shared.thumbnail(for: imagePath, maxPixelSize: maxPixelSize)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.white.opacity(0.05))
 
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(8)
+                if let previewImage {
+                    Image(nsImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(8)
+                } else {
+                    Text("Image preview unavailable")
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(height: previewHeight)
@@ -449,11 +469,6 @@ struct SearchOverlayView: View {
     }
 
     private func metadataRows(for entry: ClipboardEntry, contentForStats: String) -> [(title: String, value: String)] {
-        let chars = contentForStats.count
-        let words = contentForStats
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .count
-
         if entry.kind == .image,
            let imagePath = entry.imagePath,
            let size = ThumbnailCache.imageDimensions(at: imagePath) {
@@ -480,13 +495,48 @@ struct SearchOverlayView: View {
             return rows
         }
 
+        let stats = inlineMetadataStats(for: contentForStats)
         return [
             ("Type", entry.kind.rawValue),
             ("Source", entry.sourceApp ?? "Unknown"),
-            ("Characters", "\(chars)"),
-            ("Words", "\(words)"),
+            ("Characters", stats.characterLabel),
+            ("Words", stats.wordLabel),
             ("Copied", entry.date.formatted(date: .abbreviated, time: .shortened))
         ]
+    }
+
+    private func overlayPreviewText(for entry: ClipboardEntry) -> String {
+        let preview = truncatedPrefix(
+            of: entry.content,
+            limit: Self.inlinePreviewCharacterLimit
+        )
+        return preview.text
+    }
+
+    private func isInlinePreviewTruncated(for entry: ClipboardEntry) -> Bool {
+        truncatedPrefix(
+            of: entry.content,
+            limit: Self.inlinePreviewCharacterLimit
+        ).truncated
+    }
+
+    private func inlineMetadataStats(for content: String) -> (characterLabel: String, wordLabel: String) {
+        let preview = truncatedPrefix(
+            of: content,
+            limit: Self.metadataScanCharacterLimit
+        )
+        let characterCount = preview.text.count
+        let wordCount = preview.text
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .count
+
+        let suffix = preview.truncated ? "+" : ""
+        return ("\(characterCount)\(suffix)", "\(wordCount)\(suffix)")
+    }
+
+    private func truncatedPrefix(of text: String, limit: Int) -> (text: String, truncated: Bool) {
+        let end = text.index(text.startIndex, offsetBy: limit, limitedBy: text.endIndex) ?? text.endIndex
+        return (String(text[..<end]), end != text.endIndex)
     }
 
     private func font(for kind: ClipboardEntry.Kind) -> Font {

@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-03-27
+
+### Fixed
+
+- Removed overlay-open stalls caused by formatting and previewing very large clipboard items on the hot path. List titles now scan only a small prefix, inline text preview is excerpted, and inline image preview uses cached thumbnails instead of full image decodes.
+- Opening the overlay no longer triggers redundant search/filter resets when the search state is already at its default.
+
 ## [0.5.1] - 2026-02-24
 
 ### Fixed
@@ -171,7 +178,8 @@ All notable changes to this project are documented in this file.
 - In-app preview toggle (`⌘Y`).
 - Delete/undo workflow (`⌘D` / `⌘Z`).
 
-[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/lolwierd/cb-manager/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/lolwierd/cb-manager/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/lolwierd/cb-manager/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lolwierd/cb-manager/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lolwierd/cb-manager/compare/v0.3.0...v0.4.0
