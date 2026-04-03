@@ -11,6 +11,15 @@ All notable changes to this project are documented in this file.
 - Added cached image-dimension lookups and a cost-bounded thumbnail cache so image-heavy histories stop paying repeated file-header I/O and thumbnail memory growth.
 - Removed eager image file reads from cached image row titles and deferred overlay regrouping work so opening the palette no longer pays hidden-view rebuild costs.
 - Made overlay focus restoration cancelable and moved shell PATH discovery for QMD/image helpers off the cooperative task pool to avoid every-other-open stalls around shortcut activation.
+- Moved overlay preview details and image thumbnails off the SwiftUI render path so search, delete, selection, and preview interactions no longer decode images or scan large text synchronously on the main thread.
+- Suspended clipboard polling while the overlay is visible, reduced delete-cleanup churn, and stopped delete/undo from clearing live QMD results just to rerun the same query.
+- Replaced full-file image duplicate reads with sampled image signatures and switched image paste-back/preview loading away from synchronous full-image decodes.
+- Disabled QMD runtime search/index integration so overlay interactions now stay on the local fuzzy-search path and no longer spawn qmd work while the app is running.
+- Made local search/regroup work cooperatively cancellable, raised search-input coalescing, and lowered overlay rebuild priority so quick search edits stop piling up stale rescans.
+- Reduced overlay layout churn by removing animated auto-scroll on search-driven selection changes, trimming inline preview text work, and rendering the overlay list through a rolling 100-entry window that expands as you scroll.
+- Replaced the custom overlay `ScrollView`/`LazyVStack` history pane with a native `List` while keeping search scoped to the full result set, which fixes the remaining fast-scroll lag without narrowing search coverage.
+- Added native-list content margins and switched overlay/preview thumbnail refresh to state-driven async image updates so the last row no longer sits flush against the viewport and image thumbnails/previews appear without needing a selection nudge.
+- Restored explicit selection-visibility scrolling after overlay/result-list rebuilds so the selected item stays on-screen after open and search refreshes.
 
 ## [0.5.2] - 2026-03-27
 

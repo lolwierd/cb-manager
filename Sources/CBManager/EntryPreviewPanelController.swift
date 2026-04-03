@@ -151,19 +151,9 @@ private struct EntryPreviewView: View {
 
             Group {
                 if entry.kind == .image,
-                   let imagePath = entry.imagePath,
-                   let image = NSImage(contentsOfFile: imagePath) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(.white.opacity(0.05))
-
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding(8)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(18)
+                   let imagePath = entry.imagePath {
+                    EntryPreviewImageView(path: imagePath)
+                        .padding(18)
                 } else {
                     ScrollView {
                         Text(entry.content)
@@ -202,5 +192,77 @@ private struct EntryPreviewView: View {
                 )
         )
         .padding(10)
+    }
+}
+
+private struct EntryPreviewImageView: View {
+    let path: String
+
+    @State private var loadGeneration: UInt = 0
+    @State private var displayedImage: NSImage?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let maxPixelSize = quantizedMaxPixelSize(for: geometry.size)
+            let image = displayedImage ?? ThumbnailCache.shared.cachedThumbnail(
+                for: path,
+                maxPixelSize: maxPixelSize
+            )
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.white.opacity(0.05))
+
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(8)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onAppear {
+                scheduleLoad(for: geometry.size)
+            }
+            .onChange(of: path) { _, _ in
+                scheduleLoad(for: geometry.size)
+            }
+            .onChange(of: quantizedMaxPixelSize(for: geometry.size)) { _, _ in
+                scheduleLoad(for: geometry.size)
+            }
+        }
+    }
+
+    private func quantizedMaxPixelSize(for size: CGSize) -> CGFloat {
+        let rawSize = max(size.width, size.height) * 2
+        return max(512, ceil(rawSize / 128) * 128)
+    }
+
+    private func scheduleLoad(for size: CGSize) {
+        let generation = loadGeneration &+ 1
+        loadGeneration = generation
+        let maxPixelSize = quantizedMaxPixelSize(for: size)
+        displayedImage = ThumbnailCache.shared.cachedThumbnail(
+            for: path,
+            maxPixelSize: maxPixelSize
+        )
+
+        if displayedImage != nil {
+            return
+        }
+
+        let pathSnapshot = path
+        DispatchQueue.global(qos: .userInitiated).async {
+            let image = ThumbnailCache.shared.thumbnail(
+                for: pathSnapshot,
+                maxPixelSize: maxPixelSize
+            )
+            DispatchQueue.main.async {
+                guard loadGeneration == generation else { return }
+                displayedImage = image
+            }
+        }
     }
 }

@@ -3,6 +3,7 @@ import Foundation
 enum ClipboardSearch {
     static let keywordMinimumChars = 3
     static let semanticMinimumChars = 5
+    private static let cancellationCheckInterval = 64
 
     static func normalize(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -30,23 +31,45 @@ enum ClipboardSearch {
         let queryTokens = normalizedQuery.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         guard !queryTokens.isEmpty else { return [] }
 
-        let fuzzyRanked = base.compactMap { entry -> (ClipboardEntry, Int)? in
-            guard let score = fuzzyScore(for: entry, queryTokens: queryTokens) else { return nil }
-            return (entry, score)
+        var fuzzyRanked: [(ClipboardEntry, Int)] = []
+        fuzzyRanked.reserveCapacity(min(base.count, 256))
+
+        for (index, entry) in base.enumerated() {
+            if index.isMultiple(of: cancellationCheckInterval), Task.isCancelled {
+                return []
+            }
+
+            guard let score = fuzzyScore(for: entry, queryTokens: queryTokens) else { continue }
+            fuzzyRanked.append((entry, score))
         }
-        .sorted {
+
+        guard !Task.isCancelled else { return [] }
+
+        fuzzyRanked.sort {
             if $0.1 == $1.1 { return $0.0.date > $1.0.date }
             return $0.1 > $1.1
         }
+        guard !Task.isCancelled else { return [] }
 
         var merged: [ClipboardEntry] = fuzzyRanked.map(\.0)
         var seen = Set(merged.map(\.id))
 
         if qmdResultQuery == normalizedQuery {
             let qmdIDs = (qmdKeywordIDs ?? []).union(qmdSemanticIDs ?? [])
-            let qmdOnly = base
-                .filter { qmdIDs.contains($0.id) && !seen.contains($0.id) }
-                .sorted { $0.date > $1.date }
+            var qmdOnly: [ClipboardEntry] = []
+            qmdOnly.reserveCapacity(min(qmdIDs.count, base.count))
+
+            for (index, entry) in base.enumerated() {
+                if index.isMultiple(of: cancellationCheckInterval), Task.isCancelled {
+                    return []
+                }
+
+                guard qmdIDs.contains(entry.id), !seen.contains(entry.id) else { continue }
+                qmdOnly.append(entry)
+            }
+
+            qmdOnly.sort { $0.date > $1.date }
+            guard !Task.isCancelled else { return [] }
 
             merged.append(contentsOf: qmdOnly)
             qmdOnly.forEach { seen.insert($0.id) }
@@ -66,6 +89,8 @@ enum ClipboardSearch {
 
         var total = 0
         for token in queryTokens {
+            if Task.isCancelled { return nil }
+
             if let exact = target.range(of: token) {
                 let startDistance = target.distance(from: target.startIndex, to: exact.lowerBound)
                 total += 250 + max(0, 120 - startDistance)
@@ -95,6 +120,8 @@ enum ClipboardSearch {
         var gapPenalty = 0
 
         while tokenIndex < token.endIndex {
+            if Task.isCancelled { return nil }
+
             var found = false
             while targetIndex < target.endIndex {
                 if target[targetIndex] == token[tokenIndex] {

@@ -11,10 +11,7 @@ Native macOS menu bar clipboard manager with a Spotlight-style overlay.
 - Menu bar utility (no regular Dock app window)
 - Global open shortcut (default: `⌘⇧V`, configurable)
 - Captures clipboard history for text, links, code, paths, and images
-- Fast search pipeline:
-  1. instant fuzzy local ranking
-  2. QMD keyword augmentation (`qmd search`)
-  3. QMD semantic augmentation (`qmd vsearch`)
+- Fast local fuzzy search
 - Image OCR (Vision) for searchable image text
 - In-app preview panel toggle with `⌘Y`
 
@@ -126,24 +123,16 @@ You can also right-click the app and choose **Open** once to allow launch.
 
 - SQLite DB: `~/Library/Application Support/CBManager/clipboard.sqlite`
 - Images: `~/Library/Application Support/CBManager/images/`
-- QMD docs: `~/Library/Application Support/CBManager/qmd-docs/`
 - App settings (includes global shortcut): `~/Library/Application Support/CBManager/settings.json`
 
-## QMD integration
+## Search behavior
 
-Current usage:
-
-- `qmd update` keeps index synced
-- `qmd embed` runs in background to keep vectors fresh
-- `qmd search` + `qmd vsearch` augment fuzzy results
-
-QMD must be available in `PATH`.
-The `QMD` badge in search bar is shown only when QMD is detected.
+Search currently uses only the local fuzzy ranking pipeline.
+The previous QMD augmentation path has been disabled to prioritize instant overlay responsiveness on large histories.
+To keep the overlay responsive, the live list starts with 100 rendered matches and expands the window as you scroll while still searching across the full result set.
 
 ## Troubleshooting
 
-- **qmd not found**
-  - Ensure `qmd` is installed and available: `which qmd`
 - **Paste doesn’t work**
   - Grant Accessibility permission to app/terminal running CBManager
 - **App won’t open after download**
@@ -156,7 +145,6 @@ The `QMD` badge in search bar is shown only when QMD is detected.
   - Quit app, then remove:
     - `~/Library/Application Support/CBManager/clipboard.sqlite`
     - `~/Library/Application Support/CBManager/images/`
-    - `~/Library/Application Support/CBManager/qmd-docs/`
     - `~/Library/Application Support/CBManager/settings.json`
 
 ## Project docs

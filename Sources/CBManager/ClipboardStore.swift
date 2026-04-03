@@ -183,11 +183,17 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
 
 @MainActor
 final class ClipboardStore: ObservableObject {
+    private static let duplicateImageSampleByteCount = 16 * 1024
+    private static let searchQueryDebounce: Duration = .milliseconds(120)
+
     @Published private(set) var entries: [ClipboardEntry] = []
     @Published var query = "" {
         didSet {
-            scheduleQMDSearch()
-            scheduleFilterRecompute()
+            if ClipboardSearch.normalize(query).isEmpty {
+                recomputeFilteredEntries()
+            } else {
+                scheduleFilterRecompute()
+            }
         }
     }
     @Published var selectedFilter: ClipboardEntry.Kind = .all {
@@ -195,6 +201,7 @@ final class ClipboardStore: ObservableObject {
     }
     @Published private(set) var filteredEntries: [ClipboardEntry] = []
     @Published private(set) var filteredEntriesVersion: UInt = 0
+    // QMD runtime integration is intentionally disabled for responsiveness.
     @Published private(set) var qmdSearchInProgress = false
     @Published private(set) var isQMDAvailable = false
     @Published private(set) var canUndoDelete = false
@@ -204,15 +211,11 @@ final class ClipboardStore: ObservableObject {
 
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
+    private var lastDeletionCleanupCheck = Date.distantPast
+    private var imageDuplicateSignatures: [String: ImageDuplicateSignature] = [:]
     private var filterRecomputeTask: Task<Void, Never>?
     private var filterRankingTask: Task<Void, Never>?
     private var filterRankingGeneration: UInt = 0
-    private var qmdKeywordTask: Task<Void, Never>?
-    private var qmdSemanticTask: Task<Void, Never>?
-
-    private var qmdKeywordIDs: Set<String>? = nil
-    private var qmdSemanticIDs: Set<String>? = nil
-    private var qmdResultQuery = ""
 
     private struct DeletedSnapshot {
         let entry: ClipboardEntry
@@ -226,7 +229,6 @@ final class ClipboardStore: ObservableObject {
 
     private let database = ClipboardDatabase()
     private let imageDirectory: URL
-    private let qmdSearch: QMDSearchEngine
     private let imageTitleGenerator = ImageTitleGenerator()
     private var imageTitlesEnabled = true
 
@@ -236,22 +238,9 @@ final class ClipboardStore: ObservableObject {
         let imageDirectory = base.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: imageDirectory, withIntermediateDirectories: true)
         self.imageDirectory = imageDirectory
-        self.qmdSearch = QMDSearchEngine(baseDirectory: base)
 
         entries = database.loadEntries()
         recomputeFilteredEntries()
-
-        let qmdSearch = self.qmdSearch
-        Task { [weak self, qmdSearch] in
-            let available = await qmdSearch.isAvailable()
-            await MainActor.run {
-                self?.isQMDAvailable = available
-            }
-
-            guard available else { return }
-            let bootstrapEntries = await MainActor.run { self?.entries ?? [] }
-            await qmdSearch.bootstrap(entries: bootstrapEntries)
-        }
 
         startMonitoring()
     }
@@ -261,7 +250,7 @@ final class ClipboardStore: ObservableObject {
     private func scheduleFilterRecompute() {
         filterRecomputeTask?.cancel()
         filterRecomputeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(35))
+            try? await Task.sleep(for: Self.searchQueryDebounce)
             guard !Task.isCancelled else { return }
             self?.recomputeFilteredEntries()
         }
@@ -279,18 +268,15 @@ final class ClipboardStore: ObservableObject {
         let entriesSnapshot = entries
         let querySnapshot = query
         let filterSnapshot = selectedFilter
-        let qmdResultQuerySnapshot = qmdResultQuery
-        let qmdKeywordIDsSnapshot = qmdKeywordIDs
-        let qmdSemanticIDsSnapshot = qmdSemanticIDs
 
-        filterRankingTask = Task.detached(priority: .userInitiated) { [weak self] in
+        filterRankingTask = Task.detached(priority: .utility) { [weak self] in
             let ranked = ClipboardSearch.rank(
                 entries: entriesSnapshot,
                 query: querySnapshot,
                 filter: filterSnapshot,
-                qmdResultQuery: qmdResultQuerySnapshot,
-                qmdKeywordIDs: qmdKeywordIDsSnapshot,
-                qmdSemanticIDs: qmdSemanticIDsSnapshot
+                qmdResultQuery: "",
+                qmdKeywordIDs: nil,
+                qmdSemanticIDs: nil
             )
             guard !Task.isCancelled else { return }
 
@@ -308,8 +294,8 @@ final class ClipboardStore: ObservableObject {
 
         if entry.kind == .image,
            let path = entry.imagePath,
-           let image = NSImage(contentsOfFile: path) {
-            pb.writeObjects([image])
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe]) {
+            pb.setData(data, forType: .png)
         } else {
             pb.setString(entry.content, forType: .string)
         }
@@ -376,11 +362,7 @@ final class ClipboardStore: ObservableObject {
             pendingImageDeletions[imagePath] = Date().addingTimeInterval(undoWindow)
         }
 
-        if isQMDAvailable {
-            Task { await qmdSearch.remove(id: removed.id) }
-        }
         recomputeFilteredEntries()
-        scheduleQMDSearch()
     }
 
     func undoDelete() {
@@ -396,10 +378,6 @@ final class ClipboardStore: ObservableObject {
         entries.insert(snapshot.entry, at: insertIndex)
 
         database.insert(snapshot.entry)
-        if isQMDAvailable {
-            Task { await qmdSearch.upsert(snapshot.entry) }
-        }
-
         if let path = snapshot.entry.imagePath {
             pendingImageDeletions.removeValue(forKey: path)
         }
@@ -407,18 +385,28 @@ final class ClipboardStore: ObservableObject {
         lastRestoredEntryID = snapshot.entry.id
         canUndoDelete = !deletedStack.isEmpty
         recomputeFilteredEntries()
-        scheduleQMDSearch()
     }
 
     private func startMonitoring() {
         let timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.cleanupExpiredDeletedFiles()
-                self?.pollPasteboard()
+            MainActor.assumeIsolated {
+                self?.handleMonitoringTick()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+    }
+
+    private func handleMonitoringTick() {
+        if !isOverlayVisible,
+           !pendingImageDeletions.isEmpty,
+           Date().timeIntervalSince(lastDeletionCleanupCheck) >= 2 {
+            cleanupExpiredDeletedFiles()
+            lastDeletionCleanupCheck = .now
+        }
+
+        guard !isOverlayVisible else { return }
+        pollPasteboard()
     }
 
     private func pollPasteboard() {
@@ -455,92 +443,12 @@ final class ClipboardStore: ObservableObject {
 
         entries.insert(newEntry, at: 0)
         database.insert(newEntry)
-        if isQMDAvailable {
-            Task { await qmdSearch.upsert(newEntry) }
-        }
-
         if newEntry.kind == .image {
             recognizeTextForImageEntry(newEntry)
             generateTitleForImageEntry(newEntry)
         }
 
         recomputeFilteredEntries()
-        scheduleQMDSearch()
-    }
-
-    private func scheduleQMDSearch() {
-        let normalizedQuery = ClipboardSearch.normalize(query)
-
-        qmdKeywordTask?.cancel()
-        qmdSemanticTask?.cancel()
-
-        guard isQMDAvailable else {
-            qmdResultQuery = normalizedQuery
-            qmdKeywordIDs = nil
-            qmdSemanticIDs = nil
-            qmdSearchInProgress = false
-            return
-        }
-
-        guard !normalizedQuery.isEmpty else {
-            qmdResultQuery = ""
-            qmdKeywordIDs = nil
-            qmdSemanticIDs = nil
-            qmdSearchInProgress = false
-            return
-        }
-
-        qmdResultQuery = normalizedQuery
-        qmdKeywordIDs = nil
-        qmdSemanticIDs = nil
-
-        // Keep short queries fuzzy-only for speed.
-        guard ClipboardSearch.shouldRunKeywordQMD(normalizedQuery: normalizedQuery) else {
-            qmdSearchInProgress = false
-            return
-        }
-
-        qmdSearchInProgress = true
-
-        qmdKeywordTask = Task { [weak self, qmdSearch] in
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            let ids = await qmdSearch.keywordSearchIDs(query: normalizedQuery, limit: 220)
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                guard let self, self.qmdResultQuery == normalizedQuery else { return }
-                self.qmdKeywordIDs = ids
-                self.updateQMDSearchInProgress()
-                self.recomputeFilteredEntries()
-            }
-        }
-
-        // Semantic pass kicks in for longer queries.
-        guard ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: normalizedQuery) else {
-            return
-        }
-
-        qmdSemanticTask = Task { [weak self, qmdSearch] in
-            try? await Task.sleep(for: .milliseconds(1200))
-            guard !Task.isCancelled else { return }
-            let ids = await qmdSearch.semanticSearchIDs(query: normalizedQuery, limit: 120)
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                guard let self, self.qmdResultQuery == normalizedQuery else { return }
-                self.qmdSemanticIDs = ids
-                self.updateQMDSearchInProgress()
-                self.recomputeFilteredEntries()
-            }
-        }
-    }
-
-    private func updateQMDSearchInProgress() {
-        let keywordRunning = qmdKeywordTask != nil && !(qmdKeywordTask?.isCancelled ?? true) && qmdKeywordIDs == nil
-        let semanticNeeded = ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: qmdResultQuery)
-        let semanticRunning = semanticNeeded && qmdSemanticTask != nil && !(qmdSemanticTask?.isCancelled ?? true) && qmdSemanticIDs == nil
-        qmdSearchInProgress = keywordRunning || semanticRunning
     }
 
     private func trimDeletedStack() {
@@ -560,9 +468,16 @@ final class ClipboardStore: ObservableObject {
             .filter { $0.value <= now }
             .map(\.key)
 
+        expiredPaths.forEach { pendingImageDeletions.removeValue(forKey: $0) }
         for path in expiredPaths {
-            try? FileManager.default.removeItem(atPath: path)
-            pendingImageDeletions.removeValue(forKey: path)
+            imageDuplicateSignatures.removeValue(forKey: path)
+        }
+
+        guard !expiredPaths.isEmpty else { return }
+        DispatchQueue.global(qos: .background).async {
+            for path in expiredPaths {
+                try? FileManager.default.removeItem(atPath: path)
+            }
         }
     }
 
@@ -579,22 +494,58 @@ final class ClipboardStore: ObservableObject {
                       newEntry.kind == .image,
                       let oldPath = existing.imagePath,
                       let newPath = newEntry.imagePath {
-                let fm = FileManager.default
-                guard let oldSize = try? fm.attributesOfItem(atPath: oldPath)[.size] as? Int,
-                      let newSize = try? fm.attributesOfItem(atPath: newPath)[.size] as? Int,
-                      oldSize == newSize else {
+                guard let oldSignature = imageDuplicateSignature(at: oldPath),
+                      let newSignature = imageDuplicateSignature(at: newPath),
+                      oldSignature == newSignature else {
                     continue
                 }
-                guard let oldData = try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
-                      let newData = try? Data(contentsOf: URL(fileURLWithPath: newPath)) else {
-                    continue
-                }
-                if oldData == newData {
-                    return idx
-                }
+                return idx
             }
         }
         return nil
+    }
+
+    private func imageDuplicateSignature(at path: String) -> ImageDuplicateSignature? {
+        if let cached = imageDuplicateSignatures[path] {
+            return cached
+        }
+
+        guard let signature = Self.readImageDuplicateSignature(at: path) else {
+            return nil
+        }
+        imageDuplicateSignatures[path] = signature
+        return signature
+    }
+
+    private static func readImageDuplicateSignature(at path: String) -> ImageDuplicateSignature? {
+        let fileURL = URL(fileURLWithPath: path)
+        guard let fileSizeNumber = try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber else {
+            return nil
+        }
+        let fileSize = fileSizeNumber.intValue
+        let sampleSize = min(fileSize, duplicateImageSampleByteCount)
+
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+
+        guard let headSample = try? handle.read(upToCount: sampleSize) ?? Data() else {
+            return nil
+        }
+
+        let tailSample: Data
+        if fileSize <= sampleSize {
+            tailSample = headSample
+        } else {
+            let tailOffset = UInt64(max(fileSize - sampleSize, 0))
+            try? handle.seek(toOffset: tailOffset)
+            tailSample = (try? handle.readToEnd()) ?? Data()
+        }
+
+        return ImageDuplicateSignature(
+            fileSize: fileSize,
+            headSample: headSample,
+            tailSample: tailSample
+        )
     }
 
     private func captureClipboardEntry(from pasteboard: NSPasteboard) -> ClipboardEntry? {
@@ -678,11 +629,7 @@ final class ClipboardStore: ObservableObject {
         entries[idx].refreshSearchableText()
 
         database.updateOCR(id: entryID, ocrText: text, isPending: false)
-        if isQMDAvailable {
-            Task { await qmdSearch.upsert(entries[idx]) }
-        }
-        recomputeFilteredEntries()
-        scheduleQMDSearch()
+        scheduleFilterRecompute()
     }
 
     // MARK: - Age-based pruning
@@ -697,20 +644,16 @@ final class ClipboardStore: ObservableObject {
         let removedIDs = Set(removed.map(\.id))
         entries.removeAll { removedIDs.contains($0.id) }
 
-        // Clean up image files and QMD docs.
+        // Clean up persisted image files for removed entries.
         for entry in removed {
             if let path = entry.imagePath {
                 try? FileManager.default.removeItem(atPath: path)
                 pendingImageDeletions.removeValue(forKey: path)
             }
-            if isQMDAvailable {
-                Task { await qmdSearch.remove(id: entry.id) }
-            }
         }
 
         if !removed.isEmpty {
             recomputeFilteredEntries()
-            scheduleQMDSearch()
         }
 
         return removed.count
@@ -747,11 +690,7 @@ final class ClipboardStore: ObservableObject {
         entries[idx].refreshSearchableText()
 
         database.updateAITitle(id: entryID, aiTitle: title, isPending: false)
-        if isQMDAvailable {
-            Task { await qmdSearch.upsert(entries[idx]) }
-        }
-        recomputeFilteredEntries()
-        scheduleQMDSearch()
+        scheduleFilterRecompute()
     }
 
     private func persistImage(_ image: NSImage, id: String) -> String? {
@@ -788,4 +727,10 @@ final class ClipboardStore: ObservableObject {
 
         return .text
     }
+}
+
+private struct ImageDuplicateSignature: Equatable {
+    let fileSize: Int
+    let headSample: Data
+    let tailSample: Data
 }

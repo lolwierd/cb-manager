@@ -3,8 +3,11 @@ import Carbon
 import SwiftUI
 
 struct SearchOverlayView: View {
-    private static let inlinePreviewCharacterLimit = 12_000
-    private static let metadataScanCharacterLimit = 20_000
+    nonisolated private static let inlinePreviewCharacterLimit = 4_000
+    nonisolated private static let metadataScanCharacterLimit = 6_000
+    nonisolated private static let initialVisibleEntries = 100
+    nonisolated private static let visibleEntriesPageSize = 200
+    nonisolated private static let visibleEntriesPrefetchThreshold = 24
 
     @ObservedObject var store: ClipboardStore
     let onClose: () -> Void
@@ -18,14 +21,21 @@ struct SearchOverlayView: View {
     @State private var selectedID: ClipboardEntry.ID?
     @State private var keyMonitor: Any?
     @State private var groupedEntries: [EntryGroup] = []
-    @State private var flattenedEntries: [ClipboardEntry] = []
+    @State private var flattenedEntryIDs: [ClipboardEntry.ID] = []
     @State private var rebuildVisibleEntriesTask: Task<Void, Never>?
-    @State private var needsVisibleEntriesRebuild = false
+    @State private var selectedEntryDetailsTask: Task<Void, Never>?
+    @State private var selectedEntryDetails: SelectedEntryDetails?
+    @State private var selectedEntryDetailsGeneration: UInt = 0
+    @State private var visibleEntryLimit = SearchOverlayView.initialVisibleEntries
+    @State private var totalFilteredEntryCount = 0
+    @State private var isGrowingVisibleEntryWindow = false
+    @State private var pendingScrollSelectionID: ClipboardEntry.ID?
     @FocusState private var isSearchFocused: Bool
 
     private var selectedEntry: ClipboardEntry? {
-        guard let selectedID else { return flattenedEntries.first }
-        return flattenedEntries.first { $0.id == selectedID }
+        let entries = store.filteredEntries
+        guard let selectedID else { return entries.first }
+        return entries.first { $0.id == selectedID } ?? entries.first
     }
 
     private var filterTitle: String {
@@ -65,23 +75,33 @@ struct SearchOverlayView: View {
             transaction.animation = nil
         }
         .onAppear {
-            scheduleVisibleEntriesRebuild(selectLatestAfterRebuild: true)
+            resetVisibleEntryWindow()
+            scheduleVisibleEntriesRebuild(
+                selectLatestAfterRebuild: true,
+                scrollSelectionIntoViewAfterRebuild: true
+            )
             focusSearchField()
             updateKeyMonitorForOverlayVisibility()
         }
         .onDisappear {
             rebuildVisibleEntriesTask?.cancel()
+            selectedEntryDetailsTask?.cancel()
             removeKeyMonitor()
         }
         .onChange(of: store.filteredEntriesVersion) { _, _ in
-            guard store.isOverlayVisible else {
-                needsVisibleEntriesRebuild = true
-                return
-            }
-            scheduleVisibleEntriesRebuild(refreshSelectionAfterRebuild: true)
+            guard store.isOverlayVisible else { return }
+            resetVisibleEntryWindow()
+            scheduleVisibleEntriesRebuild(
+                refreshSelectionAfterRebuild: true,
+                scrollSelectionIntoViewAfterRebuild: true
+            )
         }
         .onChange(of: store.overlayPresentedToken) { _, _ in
-            scheduleVisibleEntriesRebuild(selectLatestAfterRebuild: true)
+            resetVisibleEntryWindow()
+            scheduleVisibleEntriesRebuild(
+                selectLatestAfterRebuild: true,
+                scrollSelectionIntoViewAfterRebuild: true
+            )
             focusSearchField()
         }
         .onChange(of: store.isOverlayVisible) { _, _ in
@@ -90,7 +110,11 @@ struct SearchOverlayView: View {
         .onChange(of: store.lastRestoredEntryID) { _, restoredID in
             guard let restoredID else { return }
             selectedID = restoredID
+            pendingScrollSelectionID = restoredID
             focusSearchField()
+        }
+        .onChange(of: selectedID) { _, _ in
+            scheduleSelectedEntryDetailsUpdate()
         }
         .onMoveCommand(perform: handleMoveCommand)
         .onExitCommand(perform: onClose)
@@ -165,64 +189,93 @@ struct SearchOverlayView: View {
 
     private var historyList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(groupedEntries) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(group.title)
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
-                                .padding(.horizontal, 14)
-
-                            ForEach(group.items) { entry in
-                                EntryRow(entry: entry, isSelected: selectedID == entry.id)
-                                    .id(entry.id)
-                                    .onTapGesture {
-                                        selectedID = entry.id
-                                    }
-                                    .simultaneousGesture(
-                                        TapGesture(count: 2).onEnded { onConfirm(entry) }
-                                    )
-                            }
+            List {
+                ForEach(groupedEntries) { group in
+                    Section {
+                        ForEach(group.items) { entry in
+                            row(for: entry)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                         }
+                    } header: {
+                        Text(group.title)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 14)
                     }
                 }
-                .padding(.vertical, 14)
             }
+            .listStyle(.plain)
+            .contentMargins(.vertical, 10, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
             .onAppear {
                 if let selectedID {
                     proxy.scrollTo(selectedID, anchor: .top)
                 }
             }
-            .onChange(of: selectedID) { _, newValue in
-                guard let newValue else { return }
-                withAnimation(.easeOut(duration: 0.08)) {
-                    proxy.scrollTo(newValue, anchor: .center)
-                }
+            .onChange(of: pendingScrollSelectionID) { _, requestedID in
+                guard let requestedID else { return }
+                pendingScrollSelectionID = nil
+                proxy.scrollTo(requestedID, anchor: .center)
             }
         }
+    }
+
+    @ViewBuilder
+    private func row(for entry: EntryListItem) -> some View {
+        EntryRow(entry: entry, isSelected: selectedID == entry.id)
+            .equatable()
+            .id(entry.id)
+            .onAppear {
+                loadMoreVisibleEntriesIfNeeded(after: entry.id)
+            }
+            .onTapGesture {
+                selectedID = entry.id
+            }
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    guard let confirmedEntry = selectedEntry(matching: entry.id) else { return }
+                    onConfirm(confirmedEntry)
+                }
+            )
     }
 
     private var previewPane: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 0) {
             if let selectedEntry {
+                let selectedDetails = details(for: selectedEntry)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if selectedEntry.kind == .image {
-                            imagePreview(for: selectedEntry, availableSize: geometry.size)
+                            imagePreview(
+                                for: selectedEntry,
+                                availableSize: geometry.size,
+                                details: selectedDetails
+                            )
                         } else {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(overlayPreviewText(for: selectedEntry))
-                                    .font(font(for: selectedEntry.kind))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                if let selectedDetails {
+                                    Text(selectedDetails.previewText)
+                                        .font(font(for: selectedEntry.kind))
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                                if isInlinePreviewTruncated(for: selectedEntry) {
-                                    Text("Showing an excerpt here for speed. Use ⌘Y for the full preview.")
-                                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                                        .foregroundStyle(.secondary)
+                                    if selectedDetails.isPreviewTruncated {
+                                        Text("Showing an excerpt here for speed. Use ⌘Y for the full preview.")
+                                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    HStack(spacing: 8) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Loading preview…")
+                                    }
+                                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -230,7 +283,7 @@ struct SearchOverlayView: View {
 
                         Divider().overlay(.white.opacity(0.08))
 
-                        metadataSection(for: selectedEntry)
+                        metadataSection(for: selectedEntry, details: selectedDetails)
                             .padding(.top, 6)
                     }
                     .padding(20)
@@ -257,28 +310,25 @@ struct SearchOverlayView: View {
     }
 
     @ViewBuilder
-    private func imagePreview(for entry: ClipboardEntry, availableSize: CGSize) -> some View {
-        if let imagePath = entry.imagePath,
-           let imageSize = ThumbnailCache.imageDimensions(at: imagePath) {
+    private func imagePreview(
+        for entry: ClipboardEntry,
+        availableSize: CGSize,
+        details: SelectedEntryDetails?
+    ) -> some View {
+        if let imagePath = entry.imagePath {
+            let imageSize = details?.imageDimensions
             let previewHeight = adaptiveImagePreviewHeight(for: availableSize, imageSize: imageSize)
-            let maxPixelSize = max(availableSize.width, availableSize.height) * 2
-            let previewImage = ThumbnailCache.shared.thumbnail(for: imagePath, maxPixelSize: maxPixelSize)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.white.opacity(0.05))
 
-                if let previewImage {
-                    Image(nsImage: previewImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(8)
-                } else {
-                    Text("Image preview unavailable")
-                        .font(.system(size: 12, weight: .regular, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
+                SelectedImagePreviewView(
+                    path: imagePath,
+                    maxPixelSize: quantizedPreviewPixelSize(for: availableSize)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(8)
             }
             .frame(maxWidth: .infinity)
             .frame(height: previewHeight)
@@ -292,8 +342,8 @@ struct SearchOverlayView: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Indexing text in image…")
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                        .foregroundStyle(.secondary)
+                                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                                        .foregroundStyle(.secondary)
                 }
             }
         } else {
@@ -323,48 +373,102 @@ struct SearchOverlayView: View {
         return min(max(target, minHeight), maxHeight)
     }
 
+    private func quantizedPreviewPixelSize(for availableSize: CGSize) -> CGFloat {
+        let rawSize = max(availableSize.width, availableSize.height) * 2
+        return max(256, ceil(rawSize / 64) * 64)
+    }
+
+    private func resetVisibleEntryWindow() {
+        visibleEntryLimit = Self.initialVisibleEntries
+        isGrowingVisibleEntryWindow = false
+    }
+
+    private func loadMoreVisibleEntriesIfNeeded(after entryID: ClipboardEntry.ID) {
+        guard store.isOverlayVisible,
+              !isGrowingVisibleEntryWindow,
+              totalFilteredEntryCount > flattenedEntryIDs.count,
+              let index = flattenedEntryIDs.firstIndex(of: entryID),
+              index >= flattenedEntryIDs.count - Self.visibleEntriesPrefetchThreshold else {
+            return
+        }
+
+        let newLimit = min(
+            max(visibleEntryLimit, flattenedEntryIDs.count) + Self.visibleEntriesPageSize,
+            totalFilteredEntryCount
+        )
+        guard newLimit > visibleEntryLimit else { return }
+
+        isGrowingVisibleEntryWindow = true
+        visibleEntryLimit = newLimit
+        scheduleVisibleEntriesRebuild(
+            refreshSelectionAfterRebuild: false,
+            selectLatestAfterRebuild: false,
+            refreshSelectedEntryDetailsAfterRebuild: false
+        )
+    }
+
     private func scheduleVisibleEntriesRebuild(
         refreshSelectionAfterRebuild: Bool = false,
-        selectLatestAfterRebuild: Bool = false
+        selectLatestAfterRebuild: Bool = false,
+        scrollSelectionIntoViewAfterRebuild: Bool = false,
+        refreshSelectedEntryDetailsAfterRebuild: Bool = true
     ) {
         rebuildVisibleEntriesTask?.cancel()
-        needsVisibleEntriesRebuild = false
 
-        let entriesSnapshot = store.filteredEntries
-        rebuildVisibleEntriesTask = Task.detached(priority: .userInitiated) {
-            let groups = Self.makeEntryGroups(from: entriesSnapshot)
-            let flattened = groups.flatMap(\.items)
+        let totalEntries = store.filteredEntries.count
+        let entriesSnapshot = Array(store.filteredEntries.prefix(visibleEntryLimit))
+        rebuildVisibleEntriesTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(20))
+            guard !Task.isCancelled else { return }
+
+            let (groups, flattenedIDs) = Self.makeEntryGroups(from: entriesSnapshot)
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
+                isGrowingVisibleEntryWindow = false
+                totalFilteredEntryCount = totalEntries
                 groupedEntries = groups
-                flattenedEntries = flattened
+                flattenedEntryIDs = flattenedIDs
                 if selectLatestAfterRebuild {
                     selectLatestEntry()
                 } else if refreshSelectionAfterRebuild {
                     refreshSelection()
                 }
+                if scrollSelectionIntoViewAfterRebuild {
+                    pendingScrollSelectionID = selectedID
+                }
+                if refreshSelectedEntryDetailsAfterRebuild {
+                    scheduleSelectedEntryDetailsUpdate()
+                }
             }
         }
     }
 
-    nonisolated private static func makeEntryGroups(from entries: [ClipboardEntry]) -> [EntryGroup] {
+    nonisolated private static func makeEntryGroups(from entries: [ClipboardEntry]) -> ([EntryGroup], [ClipboardEntry.ID]) {
         let calendar = Calendar.current
-        var today: [ClipboardEntry] = []
-        var yesterday: [ClipboardEntry] = []
-        var earlier: [ClipboardEntry] = []
+        var today: [EntryListItem] = []
+        var yesterday: [EntryListItem] = []
+        var earlier: [EntryListItem] = []
+        var flattenedIDs: [ClipboardEntry.ID] = []
 
         today.reserveCapacity(entries.count)
         yesterday.reserveCapacity(min(entries.count, 64))
         earlier.reserveCapacity(entries.count)
+        flattenedIDs.reserveCapacity(entries.count)
 
-        for entry in entries {
+        for (index, entry) in entries.enumerated() {
+            if index.isMultiple(of: 64), Task.isCancelled {
+                return ([], [])
+            }
+
+            let listItem = EntryListItem(entry: entry)
+            flattenedIDs.append(listItem.id)
             if calendar.isDateInToday(entry.date) {
-                today.append(entry)
+                today.append(listItem)
             } else if calendar.isDateInYesterday(entry.date) {
-                yesterday.append(entry)
+                yesterday.append(listItem)
             } else {
-                earlier.append(entry)
+                earlier.append(listItem)
             }
         }
 
@@ -379,7 +483,7 @@ struct SearchOverlayView: View {
         if !earlier.isEmpty {
             groups.append(EntryGroup(title: "Earlier", items: earlier))
         }
-        return groups
+        return (groups, flattenedIDs)
     }
 
     private func focusSearchField() {
@@ -389,15 +493,51 @@ struct SearchOverlayView: View {
     }
 
     private func selectLatestEntry() {
-        selectedID = flattenedEntries.first?.id
+        selectedID = flattenedEntryIDs.first
     }
 
     private func refreshSelection() {
         if let selectedID,
-           flattenedEntries.contains(where: { $0.id == selectedID }) {
+           flattenedEntryIDs.contains(selectedID) {
             return
         }
-        selectedID = flattenedEntries.first?.id
+        selectedID = flattenedEntryIDs.first
+    }
+
+    private func selectedEntry(matching id: ClipboardEntry.ID) -> ClipboardEntry? {
+        store.filteredEntries.first { $0.id == id }
+    }
+
+    private func details(for entry: ClipboardEntry) -> SelectedEntryDetails? {
+        guard let selectedEntryDetails,
+              selectedEntryDetails.entryID == entry.id else {
+            return nil
+        }
+        return selectedEntryDetails
+    }
+
+    private func scheduleSelectedEntryDetailsUpdate() {
+        guard let entry = selectedEntry else {
+            selectedEntryDetailsTask?.cancel()
+            selectedEntryDetails = nil
+            return
+        }
+
+        selectedEntryDetailsTask?.cancel()
+        let generation = selectedEntryDetailsGeneration &+ 1
+        selectedEntryDetailsGeneration = generation
+        let entrySnapshot = entry
+
+        selectedEntryDetailsTask = Task.detached(priority: .utility) {
+            let details = Self.buildSelectedEntryDetails(for: entrySnapshot)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard selectedEntryDetailsGeneration == generation,
+                      selectedID == entrySnapshot.id else { return }
+                selectedEntryDetails = details
+            }
+        }
     }
 
     private func handleMoveCommand(_ direction: MoveCommandDirection) {
@@ -475,116 +615,54 @@ struct SearchOverlayView: View {
     }
 
     private func moveSelection(by delta: Int) {
-        guard !flattenedEntries.isEmpty else { return }
+        guard !flattenedEntryIDs.isEmpty else { return }
 
         guard let selectedID,
-              let idx = flattenedEntries.firstIndex(where: { $0.id == selectedID }) else {
-            self.selectedID = flattenedEntries.first?.id
+              let idx = flattenedEntryIDs.firstIndex(of: selectedID) else {
+            self.selectedID = flattenedEntryIDs.first
+            pendingScrollSelectionID = self.selectedID
             return
         }
 
-        let newIndex = min(max(idx + delta, 0), flattenedEntries.count - 1)
-        self.selectedID = flattenedEntries[newIndex].id
+        let newIndex = min(max(idx + delta, 0), flattenedEntryIDs.count - 1)
+        self.selectedID = flattenedEntryIDs[newIndex]
+        pendingScrollSelectionID = self.selectedID
     }
 
     @ViewBuilder
-    private func metadataSection(for entry: ClipboardEntry) -> some View {
-        let contentForStats = entry.kind == .image ? entry.ocrText : entry.content
-        let rows = metadataRows(for: entry, contentForStats: contentForStats)
-
+    private func metadataSection(for entry: ClipboardEntry, details: SelectedEntryDetails?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Information")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 6)
 
-            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+            if let details {
+                ForEach(Array(details.metadataRows.enumerated()), id: \.offset) { index, row in
+                    HStack(spacing: 8) {
+                        Text(row.title)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(row.value)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .font(.system(size: 12, weight: .regular, design: .rounded))
+                    .padding(.vertical, 6)
+
+                    if index < details.metadataRows.count - 1 {
+                        Divider().overlay(.white.opacity(0.06))
+                    }
+                }
+            } else {
                 HStack(spacing: 8) {
-                    Text(row.title)
+                    ProgressView().controlSize(.small)
+                    Text("Loading information…")
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(row.value)
-                        .multilineTextAlignment(.trailing)
                 }
                 .font(.system(size: 12, weight: .regular, design: .rounded))
                 .padding(.vertical, 6)
-
-                if index < rows.count - 1 {
-                    Divider().overlay(.white.opacity(0.06))
-                }
             }
         }
-    }
-
-    private func metadataRows(for entry: ClipboardEntry, contentForStats: String) -> [(title: String, value: String)] {
-        if entry.kind == .image,
-           let imagePath = entry.imagePath,
-           let size = ThumbnailCache.imageDimensions(at: imagePath) {
-            var rows: [(title: String, value: String)] = []
-
-            let trimmedTitle = entry.aiTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedTitle.isEmpty {
-                rows.append(("Title", trimmedTitle))
-            } else if entry.isAITitlePending {
-                rows.append(("Title", "Generating…"))
-            }
-
-            rows += [
-                ("Type", entry.kind.rawValue),
-                ("Source", entry.sourceApp ?? "Unknown"),
-                ("Dimensions", "\(Int(size.width)) × \(Int(size.height))"),
-                ("Copied", entry.date.formatted(date: .abbreviated, time: .shortened))
-            ]
-
-            if entry.isOCRPending {
-                rows.append(("OCR", "Extracting text…"))
-            }
-
-            return rows
-        }
-
-        let stats = inlineMetadataStats(for: contentForStats)
-        return [
-            ("Type", entry.kind.rawValue),
-            ("Source", entry.sourceApp ?? "Unknown"),
-            ("Characters", stats.characterLabel),
-            ("Words", stats.wordLabel),
-            ("Copied", entry.date.formatted(date: .abbreviated, time: .shortened))
-        ]
-    }
-
-    private func overlayPreviewText(for entry: ClipboardEntry) -> String {
-        let preview = truncatedPrefix(
-            of: entry.content,
-            limit: Self.inlinePreviewCharacterLimit
-        )
-        return preview.text
-    }
-
-    private func isInlinePreviewTruncated(for entry: ClipboardEntry) -> Bool {
-        truncatedPrefix(
-            of: entry.content,
-            limit: Self.inlinePreviewCharacterLimit
-        ).truncated
-    }
-
-    private func inlineMetadataStats(for content: String) -> (characterLabel: String, wordLabel: String) {
-        let preview = truncatedPrefix(
-            of: content,
-            limit: Self.metadataScanCharacterLimit
-        )
-        let characterCount = preview.text.count
-        let wordCount = preview.text
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .count
-
-        let suffix = preview.truncated ? "+" : ""
-        return ("\(characterCount)\(suffix)", "\(wordCount)\(suffix)")
-    }
-
-    private func truncatedPrefix(of text: String, limit: Int) -> (text: String, truncated: Bool) {
-        let end = text.index(text.startIndex, offsetBy: limit, limitedBy: text.endIndex) ?? text.endIndex
-        return (String(text[..<end]), end != text.endIndex)
     }
 
     private func font(for kind: ClipboardEntry.Kind) -> Font {
@@ -595,10 +673,84 @@ struct SearchOverlayView: View {
             return .system(size: 14, weight: .regular, design: .rounded)
         }
     }
+
+    nonisolated private static func buildSelectedEntryDetails(for entry: ClipboardEntry) -> SelectedEntryDetails {
+        if entry.kind == .image {
+            let imageSize = entry.imagePath.flatMap(ThumbnailCache.imageDimensions)
+            var rows: [MetadataRow] = []
+
+            let trimmedTitle = entry.aiTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTitle.isEmpty {
+                rows.append(MetadataRow(title: "Title", value: trimmedTitle))
+            } else if entry.isAITitlePending {
+                rows.append(MetadataRow(title: "Title", value: "Generating…"))
+            }
+
+            rows.append(contentsOf: [
+                MetadataRow(title: "Type", value: entry.kind.rawValue),
+                MetadataRow(title: "Source", value: entry.sourceApp ?? "Unknown"),
+                MetadataRow(
+                    title: "Dimensions",
+                    value: imageSize.map { "\(Int($0.width)) × \(Int($0.height))" } ?? "Unknown"
+                ),
+                MetadataRow(
+                    title: "Copied",
+                    value: entry.date.formatted(date: .abbreviated, time: .shortened)
+                )
+            ])
+
+            if entry.isOCRPending {
+                rows.append(MetadataRow(title: "OCR", value: "Extracting text…"))
+            }
+
+            return SelectedEntryDetails(
+                entryID: entry.id,
+                previewText: "",
+                isPreviewTruncated: false,
+                imageDimensions: imageSize,
+                metadataRows: rows
+            )
+        }
+
+        let preview = truncatedPrefix(of: entry.content, limit: inlinePreviewCharacterLimit)
+        let stats = inlineMetadataStats(for: entry.content)
+        return SelectedEntryDetails(
+            entryID: entry.id,
+            previewText: preview.text,
+            isPreviewTruncated: preview.truncated,
+            imageDimensions: nil,
+            metadataRows: [
+                MetadataRow(title: "Type", value: entry.kind.rawValue),
+                MetadataRow(title: "Source", value: entry.sourceApp ?? "Unknown"),
+                MetadataRow(title: "Characters", value: stats.characterLabel),
+                MetadataRow(title: "Words", value: stats.wordLabel),
+                MetadataRow(
+                    title: "Copied",
+                    value: entry.date.formatted(date: .abbreviated, time: .shortened)
+                )
+            ]
+        )
+    }
+
+    nonisolated private static func inlineMetadataStats(for content: String) -> (characterLabel: String, wordLabel: String) {
+        let preview = truncatedPrefix(of: content, limit: metadataScanCharacterLimit)
+        let characterCount = preview.text.count
+        let wordCount = preview.text
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .count
+
+        let suffix = preview.truncated ? "+" : ""
+        return ("\(characterCount)\(suffix)", "\(wordCount)\(suffix)")
+    }
+
+    nonisolated private static func truncatedPrefix(of text: String, limit: Int) -> (text: String, truncated: Bool) {
+        let end = text.index(text.startIndex, offsetBy: limit, limitedBy: text.endIndex) ?? text.endIndex
+        return (String(text[..<end]), end != text.endIndex)
+    }
 }
 
-private struct EntryRow: View {
-    let entry: ClipboardEntry
+private struct EntryRow: View, Equatable {
+    let entry: EntryListItem
     let isSelected: Bool
 
     var body: some View {
@@ -642,23 +794,8 @@ private struct EntryRow: View {
     @ViewBuilder
     private var thumbnailOrIcon: some View {
         if entry.kind == .image,
-           let imagePath = entry.imagePath,
-           let thumbnail = ThumbnailCache.shared.thumbnail(for: imagePath) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(.white.opacity(0.06))
-
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(2)
-            }
-            .frame(width: 30, height: 30)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
-            )
+           let imagePath = entry.imagePath {
+            EntryRowThumbnailView(path: imagePath)
         } else {
             Image(systemName: entry.kind.symbol)
                 .font(.system(size: 12, weight: .medium))
@@ -672,5 +809,154 @@ private struct EntryRow: View {
 private struct EntryGroup: Identifiable, Sendable {
     var id: String { title }
     let title: String
-    let items: [ClipboardEntry]
+    let items: [EntryListItem]
+}
+
+private struct EntryListItem: Identifiable, Hashable, Sendable {
+    let id: ClipboardEntry.ID
+    let kind: ClipboardEntry.Kind
+    let titleLine: String
+    let date: Date
+    let imagePath: String?
+    let isOCRPending: Bool
+
+    init(entry: ClipboardEntry) {
+        id = entry.id
+        kind = entry.kind
+        titleLine = entry.titleLine
+        date = entry.date
+        imagePath = entry.imagePath
+        isOCRPending = entry.isOCRPending
+    }
+}
+
+private struct SelectedEntryDetails {
+    let entryID: String
+    let previewText: String
+    let isPreviewTruncated: Bool
+    let imageDimensions: CGSize?
+    let metadataRows: [MetadataRow]
+}
+
+private struct MetadataRow {
+    let title: String
+    let value: String
+}
+
+private struct EntryRowThumbnailView: View {
+    let path: String
+
+    @State private var loadGeneration: UInt = 0
+    @State private var displayedThumbnail: NSImage?
+
+    var body: some View {
+        let thumbnail = displayedThumbnail ?? ThumbnailCache.shared.cachedThumbnail(for: path)
+
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(.white.opacity(0.06))
+
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(2)
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 30, height: 30)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
+        )
+        .onAppear(perform: scheduleLoad)
+        .onChange(of: path) { _, _ in
+            scheduleLoad()
+        }
+    }
+
+    private func scheduleLoad() {
+        let generation = loadGeneration &+ 1
+        loadGeneration = generation
+        displayedThumbnail = ThumbnailCache.shared.cachedThumbnail(for: path)
+
+        if displayedThumbnail != nil {
+            return
+        }
+
+        let pathSnapshot = path
+        DispatchQueue.global(qos: .userInitiated).async {
+            let thumbnail = ThumbnailCache.shared.thumbnail(for: pathSnapshot)
+            DispatchQueue.main.async {
+                guard loadGeneration == generation else { return }
+                displayedThumbnail = thumbnail
+            }
+        }
+    }
+}
+
+private struct SelectedImagePreviewView: View {
+    let path: String
+    let maxPixelSize: CGFloat
+
+    @State private var loadGeneration: UInt = 0
+    @State private var displayedImage: NSImage?
+
+    var body: some View {
+        let image = displayedImage ?? ThumbnailCache.shared.cachedThumbnail(
+            for: path,
+            maxPixelSize: quantizedMaxPixelSize
+        )
+
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .onAppear(perform: scheduleLoad)
+        .onChange(of: path) { _, _ in
+            scheduleLoad()
+        }
+        .onChange(of: quantizedMaxPixelSize) { _, _ in
+            scheduleLoad()
+        }
+    }
+
+    private var quantizedMaxPixelSize: CGFloat {
+        max(256, ceil(maxPixelSize / 64) * 64)
+    }
+
+    private func scheduleLoad() {
+        let generation = loadGeneration &+ 1
+        loadGeneration = generation
+        displayedImage = ThumbnailCache.shared.cachedThumbnail(
+            for: path,
+            maxPixelSize: quantizedMaxPixelSize
+        )
+
+        if displayedImage != nil {
+            return
+        }
+
+        let pathSnapshot = path
+        let requestedSize = quantizedMaxPixelSize
+        DispatchQueue.global(qos: .userInitiated).async {
+            let image = ThumbnailCache.shared.thumbnail(
+                for: pathSnapshot,
+                maxPixelSize: requestedSize
+            )
+            DispatchQueue.main.async {
+                guard loadGeneration == generation else { return }
+                displayedImage = image
+            }
+        }
+    }
 }

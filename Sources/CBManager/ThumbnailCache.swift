@@ -11,6 +11,8 @@ final class ThumbnailCache: @unchecked Sendable {
 
     private let cache = NSCache<NSString, NSImage>()
     private let dimensionsCache = NSCache<NSString, NSValue>()
+    private let lock = NSLock()
+    private var inFlightThumbnailLoads: [NSString: DispatchGroup] = [:]
 
     private init() {
         cache.countLimit = 180
@@ -24,10 +26,33 @@ final class ThumbnailCache: @unchecked Sendable {
     /// of the file to produce a small image — orders of magnitude faster
     /// than loading the full PNG/TIFF into memory.
     func thumbnail(for path: String, maxPixelSize: CGFloat = 120) -> NSImage? {
-        let key = "\(path)_\(Int(maxPixelSize))" as NSString
+        let key = cacheKey(for: path, maxPixelSize: maxPixelSize)
 
         if let cached = cache.object(forKey: key) {
             return cached
+        }
+
+        let (loadGroup, createdLoadGroup) = lock.withLock { () -> (DispatchGroup, Bool) in
+            if let existing = inFlightThumbnailLoads[key] {
+                return (existing, false)
+            }
+
+            let group = DispatchGroup()
+            group.enter()
+            inFlightThumbnailLoads[key] = group
+            return (group, true)
+        }
+
+        if !createdLoadGroup {
+            loadGroup.wait()
+            return cache.object(forKey: key)
+        }
+
+        defer {
+            lock.withLock {
+                loadGroup.leave()
+                inFlightThumbnailLoads.removeValue(forKey: key)
+            }
         }
 
         let url = URL(fileURLWithPath: path)
@@ -47,6 +72,10 @@ final class ThumbnailCache: @unchecked Sendable {
         let cost = cgImage.bytesPerRow * cgImage.height
         cache.setObject(image, forKey: key, cost: cost)
         return image
+    }
+
+    func cachedThumbnail(for path: String, maxPixelSize: CGFloat = 120) -> NSImage? {
+        cache.object(forKey: cacheKey(for: path, maxPixelSize: maxPixelSize))
     }
 
     /// Read pixel dimensions from the image file header without loading the full image.
@@ -78,8 +107,12 @@ final class ThumbnailCache: @unchecked Sendable {
 
     /// Evict a specific entry (e.g. after deletion).
     func evict(path: String, maxPixelSize: CGFloat = 120) {
-        let key = "\(path)_\(Int(maxPixelSize))" as NSString
+        let key = cacheKey(for: path, maxPixelSize: maxPixelSize)
         cache.removeObject(forKey: key)
         dimensionsCache.removeObject(forKey: path as NSString)
+    }
+
+    private func cacheKey(for path: String, maxPixelSize: CGFloat) -> NSString {
+        "\(path)_\(Int(maxPixelSize.rounded()))" as NSString
     }
 }
