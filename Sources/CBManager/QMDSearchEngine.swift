@@ -14,16 +14,20 @@ actor QMDSearchEngine {
         resolvedQMDPath = nil
     }
 
-    /// Resolve the qmd binary path on first use (off the main thread).
-    private func resolvePathIfNeeded() {
+    /// Resolve the qmd binary path on first use without blocking the Swift task pool.
+    private func resolvePathIfNeeded() async {
         guard !pathResolved else { return }
         pathResolved = true
-        let shellPATH = Self.resolveShellPATH()
-        resolvedQMDPath = Self.findQMD(in: shellPATH)
+        resolvedQMDPath = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .background).async {
+                let shellPATH = Self.resolveShellPATH()
+                continuation.resume(returning: Self.findQMD(in: shellPATH))
+            }
+        }
     }
 
     func isAvailable() async -> Bool {
-        resolvePathIfNeeded()
+        await resolvePathIfNeeded()
         guard let output = await runQMD(["--version"]) else { return false }
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -76,6 +80,7 @@ actor QMDSearchEngine {
     }
 
     private func searchIDs(command: [String]) async -> Set<String> {
+        await resolvePathIfNeeded()
         guard let output = await runQMD(command) else { return [] }
         return Self.parseIDs(from: output)
     }
@@ -96,6 +101,7 @@ actor QMDSearchEngine {
     }
 
     private func ensureCollection() async {
+        await resolvePathIfNeeded()
         guard !collectionEnsured else { return }
         guard await runQMD(["collection", "add", docsDirectory.path, "--name", collectionName]) != nil else { return }
         collectionEnsured = true

@@ -10,9 +10,12 @@ final class ThumbnailCache: @unchecked Sendable {
     static let shared = ThumbnailCache()
 
     private let cache = NSCache<NSString, NSImage>()
+    private let dimensionsCache = NSCache<NSString, NSValue>()
 
     private init() {
-        cache.countLimit = 300
+        cache.countLimit = 180
+        cache.totalCostLimit = 64 * 1024 * 1024
+        dimensionsCache.countLimit = 1024
     }
 
     /// Create or retrieve a cached thumbnail for the image at `path`.
@@ -41,12 +44,22 @@ final class ThumbnailCache: @unchecked Sendable {
         }
 
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        cache.setObject(image, forKey: key)
+        let cost = cgImage.bytesPerRow * cgImage.height
+        cache.setObject(image, forKey: key, cost: cost)
         return image
     }
 
     /// Read pixel dimensions from the image file header without loading the full image.
     static func imageDimensions(at path: String) -> CGSize? {
+        shared.cachedImageDimensions(at: path)
+    }
+
+    private func cachedImageDimensions(at path: String) -> CGSize? {
+        let key = path as NSString
+        if let cached = dimensionsCache.object(forKey: key) {
+            return cached.sizeValue
+        }
+
         let url = URL(fileURLWithPath: path)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else {
@@ -58,12 +71,15 @@ final class ThumbnailCache: @unchecked Sendable {
             return nil
         }
 
-        return CGSize(width: width, height: height)
+        let size = CGSize(width: width, height: height)
+        dimensionsCache.setObject(NSValue(size: size), forKey: key)
+        return size
     }
 
     /// Evict a specific entry (e.g. after deletion).
     func evict(path: String, maxPixelSize: CGFloat = 120) {
         let key = "\(path)_\(Int(maxPixelSize))" as NSString
         cache.removeObject(forKey: key)
+        dimensionsCache.removeObject(forKey: path as NSString)
     }
 }

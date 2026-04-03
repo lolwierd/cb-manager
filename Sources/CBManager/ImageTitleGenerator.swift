@@ -22,15 +22,15 @@ actor ImageTitleGenerator {
     }
 
     /// Check whether the `pi` CLI binary is reachable.
-    func isAvailable() -> Bool {
-        resolvePathIfNeeded()
+    func isAvailable() async -> Bool {
+        await resolvePathIfNeeded()
         return resolvedPiPath != nil
     }
 
     /// Generate a one-sentence description for the image at the given path.
     /// Returns `nil` on any failure (missing binary, timeout, bad output, etc.).
     func generateTitle(forImageAt imagePath: String) async -> String? {
-        resolvePathIfNeeded()
+        await resolvePathIfNeeded()
         guard let piPath = resolvedPiPath else { return nil }
 
         let prompt = """
@@ -127,11 +127,15 @@ actor ImageTitleGenerator {
 
     // MARK: - Path resolution (same strategy as QMDSearchEngine)
 
-    private func resolvePathIfNeeded() {
+    private func resolvePathIfNeeded() async {
         guard !pathResolved else { return }
         pathResolved = true
-        let shellPATH = Self.resolveShellPATH()
-        resolvedPiPath = Self.findBinary(named: "pi", in: shellPATH)
+        resolvedPiPath = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .background).async {
+                let shellPATH = Self.resolveShellPATH()
+                continuation.resume(returning: Self.findBinary(named: "pi", in: shellPATH))
+            }
+        }
     }
 
     private static func resolveShellPATH() -> String {

@@ -24,12 +24,14 @@ enum ClipboardSearch {
         qmdKeywordIDs: Set<String>?,
         qmdSemanticIDs: Set<String>?
     ) -> [ClipboardEntry] {
-        let base = entries.filter { filter == .all || $0.kind == filter }
         let normalizedQuery = normalize(query)
+        let base = filter == .all ? entries : entries.filter { $0.kind == filter }
         guard !normalizedQuery.isEmpty else { return base }
+        let queryTokens = normalizedQuery.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !queryTokens.isEmpty else { return [] }
 
         let fuzzyRanked = base.compactMap { entry -> (ClipboardEntry, Int)? in
-            guard let score = fuzzyScore(for: entry, query: normalizedQuery) else { return nil }
+            guard let score = fuzzyScore(for: entry, queryTokens: queryTokens) else { return nil }
             return (entry, score)
         }
         .sorted {
@@ -54,12 +56,16 @@ enum ClipboardSearch {
     }
 
     static func fuzzyScore(for entry: ClipboardEntry, query: String) -> Int? {
-        let target = entry.searchableText
         let tokens = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        guard !tokens.isEmpty else { return nil }
+        return fuzzyScore(for: entry, queryTokens: tokens)
+    }
+
+    private static func fuzzyScore(for entry: ClipboardEntry, queryTokens: [String]) -> Int? {
+        let target = entry.searchableText
+        guard !queryTokens.isEmpty else { return nil }
 
         var total = 0
-        for token in tokens {
+        for token in queryTokens {
             if let exact = target.range(of: token) {
                 let startDistance = target.distance(from: target.startIndex, to: exact.lowerBound)
                 total += 250 + max(0, 120 - startDistance)

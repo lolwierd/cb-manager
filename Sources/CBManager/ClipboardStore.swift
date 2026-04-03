@@ -35,11 +35,12 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     var aiTitle: String = ""
     var isAITitlePending: Bool = false
 
-    /// Precomputed lowercased search text. Updated via `refreshSearchableText()`
-    /// when `ocrText` or `aiTitle` change after init.
+    /// Precomputed lowercased search text and one-line title. Updated via
+    /// `refreshSearchableText()` when OCR or AI title state changes.
     private(set) var searchableText: String = ""
+    private(set) var titleLine: String = ""
 
-    // Custom init mirrors the memberwise init but precomputes searchableText.
+    // Custom init mirrors the memberwise init but precomputes derived text.
     init(
         id: String,
         content: String,
@@ -62,43 +63,27 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
         self.isOCRPending = isOCRPending
         self.aiTitle = aiTitle
         self.isAITitlePending = isAITitlePending
-        self.searchableText = Self.buildSearchableText(
-            content: content, ocrText: ocrText, aiTitle: aiTitle,
-            sourceApp: sourceApp, kind: kind
-        )
+        refreshSearchableText()
     }
 
-    /// Call after mutating `ocrText` or `aiTitle` to keep the search cache current.
+    /// Call after mutating OCR or AI title state to keep derived text current.
     mutating func refreshSearchableText() {
         searchableText = Self.buildSearchableText(
             content: content, ocrText: ocrText, aiTitle: aiTitle,
             sourceApp: sourceApp, kind: kind
         )
+        titleLine = Self.buildTitleLine(
+            content: content,
+            sourceApp: sourceApp,
+            kind: kind,
+            aiTitle: aiTitle,
+            isAITitlePending: isAITitlePending
+        )
     }
 
-    var titleLine: String {
-        switch kind {
-        case .image:
-            let trimmedTitle = aiTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedTitle.isEmpty {
-                return Self.compactLine(trimmedTitle, limit: 90)
-            }
-            if isAITitlePending {
-                return imageSummary
-            }
-            return imageSummary
-        default:
-            return Self.compactLine(content, limit: 96)
-        }
-    }
-
-    /// Compact fallback summary for images: dimensions + source.
-    private var imageSummary: String {
+    /// Compact fallback summary for image rows without touching the file system.
+    private static func imageSummary(sourceApp: String?) -> String {
         var parts: [String] = ["Image"]
-        if let path = imagePath,
-           let size = ThumbnailCache.imageDimensions(at: path) {
-            parts.append("(\(Int(size.width))×\(Int(size.height)))")
-        }
         if let app = sourceApp, !app.isEmpty {
             parts.append("· \(app)")
         }
@@ -157,6 +142,28 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
             .lowercased()
     }
 
+    private static func buildTitleLine(
+        content: String,
+        sourceApp: String?,
+        kind: Kind,
+        aiTitle: String,
+        isAITitlePending: Bool
+    ) -> String {
+        switch kind {
+        case .image:
+            let trimmedTitle = aiTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTitle.isEmpty {
+                return compactLine(trimmedTitle, limit: 90)
+            }
+            if isAITitlePending {
+                return imageSummary(sourceApp: sourceApp)
+            }
+            return imageSummary(sourceApp: sourceApp)
+        default:
+            return compactLine(content, limit: 96)
+        }
+    }
+
     private static func compactLine(_ text: String, limit: Int) -> String {
         let scanEnd = text.index(text.startIndex, offsetBy: titleLineScanLimit, limitedBy: text.endIndex) ?? text.endIndex
         let truncatedAtSource = scanEnd != text.endIndex
@@ -198,6 +205,8 @@ final class ClipboardStore: ObservableObject {
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var filterRecomputeTask: Task<Void, Never>?
+    private var filterRankingTask: Task<Void, Never>?
+    private var filterRankingGeneration: UInt = 0
     private var qmdKeywordTask: Task<Void, Never>?
     private var qmdSemanticTask: Task<Void, Never>?
 
@@ -262,15 +271,35 @@ final class ClipboardStore: ObservableObject {
     /// Also cancels any pending debounced recompute.
     private func recomputeFilteredEntries() {
         filterRecomputeTask?.cancel()
-        filteredEntries = ClipboardSearch.rank(
-            entries: entries,
-            query: query,
-            filter: selectedFilter,
-            qmdResultQuery: qmdResultQuery,
-            qmdKeywordIDs: qmdKeywordIDs,
-            qmdSemanticIDs: qmdSemanticIDs
-        )
-        filteredEntriesVersion &+= 1
+        filterRankingTask?.cancel()
+
+        let rankingGeneration = filterRankingGeneration &+ 1
+        filterRankingGeneration = rankingGeneration
+
+        let entriesSnapshot = entries
+        let querySnapshot = query
+        let filterSnapshot = selectedFilter
+        let qmdResultQuerySnapshot = qmdResultQuery
+        let qmdKeywordIDsSnapshot = qmdKeywordIDs
+        let qmdSemanticIDsSnapshot = qmdSemanticIDs
+
+        filterRankingTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let ranked = ClipboardSearch.rank(
+                entries: entriesSnapshot,
+                query: querySnapshot,
+                filter: filterSnapshot,
+                qmdResultQuery: qmdResultQuerySnapshot,
+                qmdKeywordIDs: qmdKeywordIDsSnapshot,
+                qmdSemanticIDs: qmdSemanticIDsSnapshot
+            )
+            guard !Task.isCancelled else { return }
+
+            Task { @MainActor [weak self] in
+                guard let self, self.filterRankingGeneration == rankingGeneration else { return }
+                self.filteredEntries = ranked
+                self.filteredEntriesVersion &+= 1
+            }
+        }
     }
 
     func copyToClipboard(_ entry: ClipboardEntry) {

@@ -205,6 +205,17 @@ final class ClipboardEntryExtendedTests: XCTestCase {
         XCTAssertFalse(entry.searchableText.isEmpty)
     }
 
+    func testRefreshSearchableTextAlsoRefreshesCachedTitleLine() {
+        var entry = makeEntry(content: "", kind: .image, imagePath: nil)
+        entry.aiTitle = "A dashboard screenshot"
+        entry.isAITitlePending = false
+
+        entry.refreshSearchableText()
+
+        XCTAssertEqual(entry.titleLine, "A dashboard screenshot")
+        XCTAssertTrue(entry.searchableText.contains("a dashboard screenshot"))
+    }
+
     // MARK: - Kind
 
     func testKindSymbolsAreDefined() {

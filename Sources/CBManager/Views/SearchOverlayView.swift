@@ -17,30 +17,15 @@ struct SearchOverlayView: View {
 
     @State private var selectedID: ClipboardEntry.ID?
     @State private var keyMonitor: Any?
+    @State private var groupedEntries: [EntryGroup] = []
+    @State private var flattenedEntries: [ClipboardEntry] = []
+    @State private var rebuildVisibleEntriesTask: Task<Void, Never>?
+    @State private var needsVisibleEntriesRebuild = false
     @FocusState private var isSearchFocused: Bool
-
-    private var flattenedEntries: [ClipboardEntry] {
-        groupedEntries.flatMap(\.items)
-    }
 
     private var selectedEntry: ClipboardEntry? {
         guard let selectedID else { return flattenedEntries.first }
         return flattenedEntries.first { $0.id == selectedID }
-    }
-
-    private var groupedEntries: [EntryGroup] {
-        let calendar = Calendar.current
-
-        let groups = Dictionary(grouping: store.filteredEntries) { entry -> String in
-            if calendar.isDateInToday(entry.date) { return "Today" }
-            if calendar.isDateInYesterday(entry.date) { return "Yesterday" }
-            return "Earlier"
-        }
-
-        return ["Today", "Yesterday", "Earlier"].compactMap { key in
-            guard let items = groups[key], !items.isEmpty else { return nil }
-            return EntryGroup(title: key, items: items)
-        }
     }
 
     private var filterTitle: String {
@@ -80,17 +65,24 @@ struct SearchOverlayView: View {
             transaction.animation = nil
         }
         .onAppear {
-            applyOpenDefaults()
+            scheduleVisibleEntriesRebuild(selectLatestAfterRebuild: true)
+            focusSearchField()
             updateKeyMonitorForOverlayVisibility()
         }
         .onDisappear {
+            rebuildVisibleEntriesTask?.cancel()
             removeKeyMonitor()
         }
         .onChange(of: store.filteredEntriesVersion) { _, _ in
-            refreshSelection()
+            guard store.isOverlayVisible else {
+                needsVisibleEntriesRebuild = true
+                return
+            }
+            scheduleVisibleEntriesRebuild(refreshSelectionAfterRebuild: true)
         }
         .onChange(of: store.overlayPresentedToken) { _, _ in
-            applyOpenDefaults()
+            scheduleVisibleEntriesRebuild(selectLatestAfterRebuild: true)
+            focusSearchField()
         }
         .onChange(of: store.isOverlayVisible) { _, _ in
             updateKeyMonitorForOverlayVisibility()
@@ -98,9 +90,7 @@ struct SearchOverlayView: View {
         .onChange(of: store.lastRestoredEntryID) { _, restoredID in
             guard let restoredID else { return }
             selectedID = restoredID
-            DispatchQueue.main.async {
-                isSearchFocused = true
-            }
+            focusSearchField()
         }
         .onMoveCommand(perform: handleMoveCommand)
         .onExitCommand(perform: onClose)
@@ -333,8 +323,66 @@ struct SearchOverlayView: View {
         return min(max(target, minHeight), maxHeight)
     }
 
-    private func applyOpenDefaults() {
-        selectLatestEntry()
+    private func scheduleVisibleEntriesRebuild(
+        refreshSelectionAfterRebuild: Bool = false,
+        selectLatestAfterRebuild: Bool = false
+    ) {
+        rebuildVisibleEntriesTask?.cancel()
+        needsVisibleEntriesRebuild = false
+
+        let entriesSnapshot = store.filteredEntries
+        rebuildVisibleEntriesTask = Task.detached(priority: .userInitiated) {
+            let groups = Self.makeEntryGroups(from: entriesSnapshot)
+            let flattened = groups.flatMap(\.items)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                groupedEntries = groups
+                flattenedEntries = flattened
+                if selectLatestAfterRebuild {
+                    selectLatestEntry()
+                } else if refreshSelectionAfterRebuild {
+                    refreshSelection()
+                }
+            }
+        }
+    }
+
+    nonisolated private static func makeEntryGroups(from entries: [ClipboardEntry]) -> [EntryGroup] {
+        let calendar = Calendar.current
+        var today: [ClipboardEntry] = []
+        var yesterday: [ClipboardEntry] = []
+        var earlier: [ClipboardEntry] = []
+
+        today.reserveCapacity(entries.count)
+        yesterday.reserveCapacity(min(entries.count, 64))
+        earlier.reserveCapacity(entries.count)
+
+        for entry in entries {
+            if calendar.isDateInToday(entry.date) {
+                today.append(entry)
+            } else if calendar.isDateInYesterday(entry.date) {
+                yesterday.append(entry)
+            } else {
+                earlier.append(entry)
+            }
+        }
+
+        var groups: [EntryGroup] = []
+        groups.reserveCapacity(3)
+        if !today.isEmpty {
+            groups.append(EntryGroup(title: "Today", items: today))
+        }
+        if !yesterday.isEmpty {
+            groups.append(EntryGroup(title: "Yesterday", items: yesterday))
+        }
+        if !earlier.isEmpty {
+            groups.append(EntryGroup(title: "Earlier", items: earlier))
+        }
+        return groups
+    }
+
+    private func focusSearchField() {
         DispatchQueue.main.async {
             isSearchFocused = true
         }
@@ -345,8 +393,8 @@ struct SearchOverlayView: View {
     }
 
     private func refreshSelection() {
-        let currentIDs = Set(flattenedEntries.map(\.id))
-        if let selectedID, currentIDs.contains(selectedID) {
+        if let selectedID,
+           flattenedEntries.contains(where: { $0.id == selectedID }) {
             return
         }
         selectedID = flattenedEntries.first?.id
@@ -427,16 +475,16 @@ struct SearchOverlayView: View {
     }
 
     private func moveSelection(by delta: Int) {
-        let ids = groupedEntries.flatMap(\.items).map(\.id)
-        guard !ids.isEmpty else { return }
+        guard !flattenedEntries.isEmpty else { return }
 
-        guard let selectedID, let idx = ids.firstIndex(of: selectedID) else {
-            self.selectedID = ids.first
+        guard let selectedID,
+              let idx = flattenedEntries.firstIndex(where: { $0.id == selectedID }) else {
+            self.selectedID = flattenedEntries.first?.id
             return
         }
 
-        let newIndex = min(max(idx + delta, 0), ids.count - 1)
-        self.selectedID = ids[newIndex]
+        let newIndex = min(max(idx + delta, 0), flattenedEntries.count - 1)
+        self.selectedID = flattenedEntries[newIndex].id
     }
 
     @ViewBuilder
@@ -621,7 +669,7 @@ private struct EntryRow: View {
     }
 }
 
-private struct EntryGroup: Identifiable {
+private struct EntryGroup: Identifiable, Sendable {
     var id: String { title }
     let title: String
     let items: [ClipboardEntry]

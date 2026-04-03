@@ -14,6 +14,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     private var previousFrontmostApp: NSRunningApplication?
     private var isProgrammaticMove = false
     private var mouseUpMonitor: Any?
+    private var focusRestoreWorkItem: DispatchWorkItem?
 
     private let panelSize = NSSize(width: 980, height: 620)
     private let snapThreshold: CGFloat = 12
@@ -33,6 +34,9 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     }
 
     func show(captureFrontmost: Bool = true, resetSearch: Bool = true) {
+        focusRestoreWorkItem?.cancel()
+        focusRestoreWorkItem = nil
+
         if captureFrontmost,
            let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != NSRunningApplication.current.processIdentifier {
@@ -56,6 +60,9 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         removeMouseUpMonitor()
         guard panel.isVisible else { return }
 
+        focusRestoreWorkItem?.cancel()
+        focusRestoreWorkItem = nil
+
         panel.orderOut(nil)
         panel.alphaValue = 1
         store.overlayDidClose()
@@ -63,14 +70,28 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         if restoreFocus,
            let target = previousFrontmostApp,
            target.processIdentifier != NSRunningApplication.current.processIdentifier {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            let workItem = DispatchWorkItem {
                 target.unhide()
-                let activated = target.activate(options: [.activateAllWindows])
+                let activated = target.activate(options: [])
                 if !activated {
                     NSApp.hide(nil)
                 }
             }
+            focusRestoreWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03, execute: workItem)
         }
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window == panel,
+              !window.isVisible,
+              store.isOverlayVisible else { return }
+        alignmentGuides.hideAll()
+        removeMouseUpMonitor()
+        focusRestoreWorkItem?.cancel()
+        focusRestoreWorkItem = nil
+        store.overlayDidClose()
     }
 
     func windowDidMove(_ notification: Notification) {

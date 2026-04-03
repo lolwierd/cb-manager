@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Performance
+
+- Moved clipboard filtering/ranking off the main actor so large histories and long clipboard items no longer block typing or overlay refresh while search results are recomputed.
+- Cached grouped overlay sections and entry title lines to avoid repeated regrouping/string work during SwiftUI redraws.
+- Added cached image-dimension lookups and a cost-bounded thumbnail cache so image-heavy histories stop paying repeated file-header I/O and thumbnail memory growth.
+- Removed eager image file reads from cached image row titles and deferred overlay regrouping work so opening the palette no longer pays hidden-view rebuild costs.
+- Made overlay focus restoration cancelable and moved shell PATH discovery for QMD/image helpers off the cooperative task pool to avoid every-other-open stalls around shortcut activation.
+
 ## [0.5.2] - 2026-03-27
 
 ### Fixed
