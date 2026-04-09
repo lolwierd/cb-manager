@@ -20,6 +20,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     private let snapThreshold: CGFloat = 12
     private let pasteActivationTimeout: Duration = .seconds(1)
     private let pasteActivationPollInterval: Duration = .milliseconds(40)
+    private let pastePostActivationDelay: Duration = .milliseconds(80)
 
     init(store: ClipboardStore) {
         self.store = store
@@ -43,6 +44,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
            let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != NSRunningApplication.current.processIdentifier {
             previousFrontmostApp = frontmost
+            PasteDiagnostics.log("Captured previous frontmost app: \(PasteDiagnostics.describe(frontmost))")
         }
 
         installMouseUpMonitor()
@@ -75,6 +77,9 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
             let workItem = DispatchWorkItem {
                 target.unhide()
                 let activated = target.activate(options: [.activateAllWindows])
+                PasteDiagnostics.log(
+                    "Restoring focus to previous app activated=\(activated) target=\(PasteDiagnostics.describe(target))"
+                )
                 if !activated {
                     NSApp.hide(nil)
                 }
@@ -168,49 +173,92 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     }
 
     private func paste(_ entry: ClipboardEntry) {
-        store.bumpToTop(entry)
-        store.copyToClipboard(entry)
-        hide(restoreFocus: false)
+        let clipboardWriteSucceeded = store.copyToClipboard(entry)
+        if clipboardWriteSucceeded {
+            store.bumpToTop(entry)
+        }
 
-        guard let target = previousFrontmostApp,
-              target.processIdentifier != NSRunningApplication.current.processIdentifier else {
+        let target = previousFrontmostApp
+        let permissions = PasteAutomationPermissions.snapshot()
+        let preflight = PastePreflight(
+            clipboardWriteSucceeded: clipboardWriteSucceeded,
+            hasTargetApp: target != nil,
+            targetAppIsCurrentApp: target?.processIdentifier == NSRunningApplication.current.processIdentifier,
+            permissions: permissions
+        )
+
+        PasteDiagnostics.log(
+            "Paste requested entryID=\(entry.id) kind=\(entry.kind.rawValue) target=\(PasteDiagnostics.describe(target)) clipboardWriteSucceeded=\(clipboardWriteSucceeded) accessibilityTrusted=\(permissions.accessibilityTrusted) postEventAccess=\(permissions.postEventAccess) preflight=\(preflight.failure?.rawValue ?? "ready")"
+        )
+
+        if let failure = preflight.failure {
+            if failure == .missingAccessibilityPermission || failure == .missingPostEventPermission {
+                let promptedPermissions = PasteAutomationPermissions.snapshot(promptIfNeeded: true)
+                PasteDiagnostics.log(
+                    "Prompted paste permissions failure=\(failure.rawValue) accessibilityTrusted=\(promptedPermissions.accessibilityTrusted) postEventAccess=\(promptedPermissions.postEventAccess)"
+                )
+            }
             NSSound.beep()
             return
         }
 
+        guard let target else {
+            NSSound.beep()
+            return
+        }
+
+        hide(restoreFocus: false)
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard await self.activatePasteTarget(target) else {
+                PasteDiagnostics.log("Failed to activate paste target before synthetic paste: \(PasteDiagnostics.describe(target))")
                 NSSound.beep()
                 return
             }
-            try? await Task.sleep(for: .milliseconds(60))
-            self.sendCommandV()
+            try? await Task.sleep(for: self.pastePostActivationDelay)
+            self.sendCommandV(to: target.processIdentifier)
         }
     }
 
     private func activatePasteTarget(_ target: NSRunningApplication) async -> Bool {
         let activationOptions: NSApplication.ActivationOptions = [.activateAllWindows]
         let deadline = ContinuousClock.now + pasteActivationTimeout
+        var attempt = 0
 
         NSApp.hide(nil)
+        PasteDiagnostics.log("Beginning paste target activation for \(PasteDiagnostics.describe(target))")
 
         while ContinuousClock.now < deadline {
+            attempt += 1
             if target.isTerminated {
+                PasteDiagnostics.log("Paste target terminated during activation: \(PasteDiagnostics.describe(target))")
                 return false
             }
 
             target.unhide()
-            _ = target.activate(options: activationOptions)
+            let activated = target.activate(options: activationOptions)
 
             if let frontmost = NSWorkspace.shared.frontmostApplication,
                frontmost.processIdentifier == target.processIdentifier {
+                PasteDiagnostics.log(
+                    "Paste target became frontmost after \(attempt) attempt(s); activated=\(activated) frontmost=\(PasteDiagnostics.describe(frontmost))"
+                )
                 return true
+            }
+
+            if attempt == 1 || attempt % 5 == 0 {
+                PasteDiagnostics.log(
+                    "Paste target not frontmost yet attempt=\(attempt) activated=\(activated) frontmost=\(PasteDiagnostics.describe(NSWorkspace.shared.frontmostApplication))"
+                )
             }
 
             try? await Task.sleep(for: pasteActivationPollInterval)
         }
 
+        PasteDiagnostics.log(
+            "Timed out activating paste target after \(attempt) attempt(s) target=\(PasteDiagnostics.describe(target)) frontmost=\(PasteDiagnostics.describe(NSWorkspace.shared.frontmostApplication))"
+        )
         return false
     }
 
@@ -226,16 +274,25 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func sendCommandV() {
-        guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
+    private func sendCommandV(to processIdentifier: pid_t) {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+            PasteDiagnostics.log("Failed to create CGEventSource for synthetic paste")
+            return
+        }
 
         let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
         keyDown?.flags = .maskCommand
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
         keyUp?.flags = .maskCommand
 
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
+        guard let keyDown, let keyUp else {
+            PasteDiagnostics.log("Failed to create Command-V events for pid=\(processIdentifier)")
+            return
+        }
+
+        keyDown.postToPid(processIdentifier)
+        keyUp.postToPid(processIdentifier)
+        PasteDiagnostics.log("Posted synthetic Command-V directly to pid=\(processIdentifier)")
     }
 
     private func panelFrame(for screen: NSScreen) -> NSRect {

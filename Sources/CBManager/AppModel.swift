@@ -48,6 +48,11 @@ final class AppModel {
             }
         }
 
+        let pastePermissions = PasteAutomationPermissions.snapshot()
+        PasteDiagnostics.log(
+            "App launched bundleID=\(Bundle.main.bundleIdentifier ?? "nil") accessibilityTrusted=\(pastePermissions.accessibilityTrusted) postEventAccess=\(pastePermissions.postEventAccess)"
+        )
+
         hotKey.onPressed = { [weak self] in
             self?.toggleOverlay()
         }

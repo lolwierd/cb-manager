@@ -124,6 +124,7 @@ You can also right-click the app and choose **Open** once to allow launch.
 - SQLite DB: `~/Library/Application Support/CBManager/clipboard.sqlite`
 - Images: `~/Library/Application Support/CBManager/images/`
 - App settings (includes global shortcut): `~/Library/Application Support/CBManager/settings.json`
+- Paste diagnostics log: `~/Library/Application Support/CBManager/paste.log`
 
 ## Search behavior
 
@@ -134,7 +135,8 @@ To keep the overlay responsive, the live list starts with 100 rendered matches a
 ## Troubleshooting
 
 - **Paste doesn’t work**
-  - Grant Accessibility permission to app/terminal running CBManager
+  - Grant Accessibility permission to the installed `CBManager.app`
+  - Check `~/Library/Application Support/CBManager/paste.log` for activation and permission diagnostics
 - **App won’t open after download**
   - Use the `xattr` command above to remove quarantine
 - **Focus not returning to previous app**

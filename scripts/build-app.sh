@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_NAME="CBManager"
 BUNDLE_NAME="$APP_NAME.app"
+BUNDLE_ID="com.cbmanager.app"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 RES_DIR="$ROOT_DIR/Resources"
@@ -48,7 +49,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key>
   <string>CBManager</string>
   <key>CFBundleIdentifier</key>
-  <string>com.cbmanager.app</string>
+  <string>$BUNDLE_ID</string>
   <key>CFBundleVersion</key>
   <string>$VERSION</string>
   <key>CFBundleShortVersionString</key>
@@ -70,5 +71,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+echo "[cb-manager] Signing app bundle..."
+codesign --force --deep --sign - --identifier "$BUNDLE_ID" -r="designated => identifier \"$BUNDLE_ID\"" "$APP_DIR"
 
 echo "[cb-manager] App bundle ready: $APP_DIR"

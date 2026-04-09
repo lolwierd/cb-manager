@@ -355,26 +355,38 @@ final class ClipboardStore: ObservableObject {
         }
     }
 
-    func copyToClipboard(_ entry: ClipboardEntry) {
+    @discardableResult
+    func copyToClipboard(_ entry: ClipboardEntry) -> Bool {
         let pb = NSPasteboard.general
         pb.clearContents()
 
+        let writeSucceeded: Bool
         if entry.kind == .image,
            let path = entry.imagePath,
            let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe]) {
-            pb.setData(data, forType: .png)
+            writeSucceeded = pb.setData(data, forType: .png)
         } else if entry.kind == .path, !entry.restorableFileURLs.isEmpty {
             let didWriteFileURLs = pb.writeObjects(entry.restorableFileURLs.map { $0 as NSURL })
             if !didWriteFileURLs {
-                pb.setString(entry.content, forType: .string)
+                writeSucceeded = pb.setString(entry.content, forType: .string)
+            } else {
+                writeSucceeded = true
             }
         } else {
-            pb.setString(entry.content, forType: .string)
+            writeSucceeded = pb.setString(entry.content, forType: .string)
         }
 
-        // Suppress the next pasteboard poll so we don't re-capture
-        // the item we just placed on the clipboard.
-        lastChangeCount = pb.changeCount
+        if writeSucceeded {
+            // Suppress the next pasteboard poll so we don't re-capture
+            // the item we just placed on the clipboard.
+            lastChangeCount = pb.changeCount
+        }
+
+        PasteDiagnostics.log(
+            "Clipboard write id=\(entry.id) kind=\(entry.kind.rawValue) success=\(writeSucceeded) fileURLCount=\(entry.fileURLs.count) hasImagePath=\(entry.imagePath != nil) changeCount=\(pb.changeCount)"
+        )
+
+        return writeSucceeded
     }
 
     private func scheduleQMDSearch() {

@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-04-09
+
+### Fixed
+
+- Fixed local app packaging so `CBManager.app` is bundle-signed with a stable designated requirement instead of a changing `cdhash`, which prevents Accessibility/post-event trust from being invalidated on each reinstall.
+- Switched synthetic `⌘V` delivery to post directly to the previously focused app's process after activation instead of broadcasting it globally.
+- Added persistent paste diagnostics at `~/Library/Application Support/CBManager/paste.log` and explicit permission preflight/prompting when macOS blocks synthetic paste events.
+
 ## [0.5.3] - 2026-04-09
 
 ### Fixed
