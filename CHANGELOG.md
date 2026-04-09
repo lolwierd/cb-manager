@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Updated GitHub Actions workflow dependencies to the latest upstream releases: `actions/checkout@v6.0.2` and `softprops/action-gh-release@v2.6.1`, removing the release job's Node 20 deprecation path.
+
 ## [0.5.4] - 2026-04-09
 
 ### Fixed
