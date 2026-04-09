@@ -270,7 +270,7 @@ struct SettingsView: View {
                             .font(.system(size: 11, weight: .regular, design: .rounded))
                             .foregroundStyle(.tertiary)
                     } else {
-                        Text("Auto-pruning is off — entries are kept until the 300-entry limit")
+                        Text("Auto-pruning is off — clipboard history stays unlimited")
                             .font(.system(size: 11, weight: .regular, design: .rounded))
                             .foregroundStyle(.tertiary)
                     }

@@ -18,6 +18,8 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
 
     private let panelSize = NSSize(width: 980, height: 620)
     private let snapThreshold: CGFloat = 12
+    private let pasteActivationTimeout: Duration = .seconds(1)
+    private let pasteActivationPollInterval: Duration = .milliseconds(40)
 
     init(store: ClipboardStore) {
         self.store = store
@@ -72,7 +74,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
            target.processIdentifier != NSRunningApplication.current.processIdentifier {
             let workItem = DispatchWorkItem {
                 target.unhide()
-                let activated = target.activate(options: [])
+                let activated = target.activate(options: [.activateAllWindows])
                 if !activated {
                     NSApp.hide(nil)
                 }
@@ -170,13 +172,46 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         store.copyToClipboard(entry)
         hide(restoreFocus: false)
 
-        let target = previousFrontmostApp
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
-            target?.activate(options: [])
-            try? await Task.sleep(for: .milliseconds(120))
-            sendCommandV()
+        guard let target = previousFrontmostApp,
+              target.processIdentifier != NSRunningApplication.current.processIdentifier else {
+            NSSound.beep()
+            return
         }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await self.activatePasteTarget(target) else {
+                NSSound.beep()
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(60))
+            self.sendCommandV()
+        }
+    }
+
+    private func activatePasteTarget(_ target: NSRunningApplication) async -> Bool {
+        let activationOptions: NSApplication.ActivationOptions = [.activateAllWindows]
+        let deadline = ContinuousClock.now + pasteActivationTimeout
+
+        NSApp.hide(nil)
+
+        while ContinuousClock.now < deadline {
+            if target.isTerminated {
+                return false
+            }
+
+            target.unhide()
+            _ = target.activate(options: activationOptions)
+
+            if let frontmost = NSWorkspace.shared.frontmostApplication,
+               frontmost.processIdentifier == target.processIdentifier {
+                return true
+            }
+
+            try? await Task.sleep(for: pasteActivationPollInterval)
+        }
+
+        return false
     }
 
     private func openPreview(_ entry: ClipboardEntry) {

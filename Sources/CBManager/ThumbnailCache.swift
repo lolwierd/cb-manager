@@ -13,6 +13,7 @@ final class ThumbnailCache: @unchecked Sendable {
     private let dimensionsCache = NSCache<NSString, NSValue>()
     private let lock = NSLock()
     private var inFlightThumbnailLoads: [NSString: DispatchGroup] = [:]
+    private var cacheKeysByPath: [NSString: Set<NSString>] = [:]
 
     private init() {
         cache.countLimit = 180
@@ -71,6 +72,11 @@ final class ThumbnailCache: @unchecked Sendable {
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         let cost = cgImage.bytesPerRow * cgImage.height
         cache.setObject(image, forKey: key, cost: cost)
+        lock.withLock {
+            var keys = cacheKeysByPath[url.path as NSString] ?? []
+            keys.insert(key)
+            cacheKeysByPath[url.path as NSString] = keys
+        }
         return image
     }
 
@@ -106,10 +112,13 @@ final class ThumbnailCache: @unchecked Sendable {
     }
 
     /// Evict a specific entry (e.g. after deletion).
-    func evict(path: String, maxPixelSize: CGFloat = 120) {
-        let key = cacheKey(for: path, maxPixelSize: maxPixelSize)
-        cache.removeObject(forKey: key)
-        dimensionsCache.removeObject(forKey: path as NSString)
+    func evict(path: String) {
+        let pathKey = path as NSString
+        let keys = lock.withLock { cacheKeysByPath.removeValue(forKey: pathKey) ?? [] }
+        for key in keys {
+            cache.removeObject(forKey: key)
+        }
+        dimensionsCache.removeObject(forKey: pathKey)
     }
 
     private func cacheKey(for path: String, maxPixelSize: CGFloat) -> NSString {

@@ -78,7 +78,7 @@ swift test
    - Fuzzy search must be instant.
    - QMD keyword + semantic results augment fuzzy.
    - QMD keyword threshold: 3+ chars.
-   - QMD semantic threshold: 3+ chars.
+   - QMD semantic threshold: 5+ chars.
 
 5. **Layout stability**
    - Avoid row height jitter / implicit list animation regressions.

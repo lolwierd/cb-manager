@@ -141,6 +141,24 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         XCTAssertEqual(loaded.first?.imagePath, "/tmp/test.png")
     }
 
+    func testFileURLsRoundtrip() {
+        let e = ClipboardEntry(
+            id: "with-files",
+            content: "/tmp/a.txt\n/tmp/b.txt",
+            date: Date(timeIntervalSince1970: 100),
+            sourceApp: "Finder",
+            kind: .path,
+            fileURLs: ["file:///tmp/a.txt", "file:///tmp/b.txt"],
+            imagePath: nil,
+            ocrText: "",
+            isOCRPending: false
+        )
+        db.insert(e)
+        let loaded = db.loadEntries()
+        XCTAssertEqual(loaded.first?.fileURLs, ["file:///tmp/a.txt", "file:///tmp/b.txt"])
+        XCTAssertEqual(loaded.first?.restorableFileURLs.map(\.path), ["/tmp/a.txt", "/tmp/b.txt"])
+    }
+
     // MARK: - OCR fields
 
     func testOCRFieldsRoundtrip() {
@@ -289,6 +307,23 @@ final class ClipboardDatabaseExtendedTests: XCTestCase {
         db.insert(e)
         let removed = db.deleteOlderThan(Date(timeIntervalSince1970: 500))
         XCTAssertEqual(removed.first?.imagePath, "/tmp/old-image.png")
+    }
+
+    func testDeleteOlderThanPreservesFileURLs() {
+        let e = ClipboardEntry(
+            id: "path-old",
+            content: "/tmp/report.pdf",
+            date: Date(timeIntervalSince1970: 100),
+            sourceApp: "Finder",
+            kind: .path,
+            fileURLs: ["file:///tmp/report.pdf"],
+            imagePath: nil,
+            ocrText: "",
+            isOCRPending: false
+        )
+        db.insert(e)
+        let removed = db.deleteOlderThan(Date(timeIntervalSince1970: 500))
+        XCTAssertEqual(removed.first?.fileURLs, ["file:///tmp/report.pdf"])
     }
 
     // MARK: - Delete

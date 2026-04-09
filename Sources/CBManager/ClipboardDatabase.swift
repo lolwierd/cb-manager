@@ -24,7 +24,7 @@ final class ClipboardDatabase {
 
     func loadEntries() -> [ClipboardEntry] {
         let sql = """
-        SELECT id, created_at, source_app, kind, content, image_path, ocr_text, ocr_pending,
+        SELECT id, created_at, source_app, kind, content, file_urls, image_path, ocr_text, ocr_pending,
                ai_title, ai_title_pending
         FROM clipboard_entries
         ORDER BY created_at DESC;
@@ -40,11 +40,12 @@ final class ClipboardDatabase {
             let sourceApp = string(at: 2, from: statement)
             let kindString = string(at: 3, from: statement) ?? ClipboardEntry.Kind.text.rawValue
             let content = string(at: 4, from: statement) ?? ""
-            let imagePath = string(at: 5, from: statement)
-            let ocrText = string(at: 6, from: statement) ?? ""
-            let isPending = sqlite3_column_int(statement, 7) != 0
-            let aiTitle = string(at: 8, from: statement) ?? ""
-            let aiTitlePending = sqlite3_column_int(statement, 9) != 0
+            let fileURLs = decodeFileURLs(from: string(at: 5, from: statement))
+            let imagePath = string(at: 6, from: statement)
+            let ocrText = string(at: 7, from: statement) ?? ""
+            let isPending = sqlite3_column_int(statement, 8) != 0
+            let aiTitle = string(at: 9, from: statement) ?? ""
+            let aiTitlePending = sqlite3_column_int(statement, 10) != 0
 
             let kind = ClipboardEntry.Kind(rawValue: kindString) ?? .text
             result.append(
@@ -54,6 +55,7 @@ final class ClipboardDatabase {
                     date: Date(timeIntervalSince1970: createdAt),
                     sourceApp: sourceApp,
                     kind: kind,
+                    fileURLs: fileURLs,
                     imagePath: imagePath,
                     ocrText: ocrText,
                     isOCRPending: isPending,
@@ -69,8 +71,8 @@ final class ClipboardDatabase {
     func insert(_ entry: ClipboardEntry) {
         let sql = """
         INSERT OR REPLACE INTO clipboard_entries
-        (id, created_at, source_app, kind, content, image_path, ocr_text, ocr_pending, ai_title, ai_title_pending)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        (id, created_at, source_app, kind, content, file_urls, image_path, ocr_text, ocr_pending, ai_title, ai_title_pending)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
 
         guard let statement = prepare(sql) else { return }
@@ -81,11 +83,12 @@ final class ClipboardDatabase {
         sqlite3_bind_nullable_text(statement, 3, entry.sourceApp)
         sqlite3_bind_text(statement, 4, entry.kind.rawValue, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 5, entry.content, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_nullable_text(statement, 6, entry.imagePath)
-        sqlite3_bind_text(statement, 7, entry.ocrText, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(statement, 8, entry.isOCRPending ? 1 : 0)
-        sqlite3_bind_text(statement, 9, entry.aiTitle, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(statement, 10, entry.isAITitlePending ? 1 : 0)
+        sqlite3_bind_nullable_text(statement, 6, encodeFileURLs(entry.fileURLs))
+        sqlite3_bind_nullable_text(statement, 7, entry.imagePath)
+        sqlite3_bind_text(statement, 8, entry.ocrText, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 9, entry.isOCRPending ? 1 : 0)
+        sqlite3_bind_text(statement, 10, entry.aiTitle, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 11, entry.isAITitlePending ? 1 : 0)
 
         sqlite3_step(statement)
     }
@@ -127,7 +130,7 @@ final class ClipboardDatabase {
 
         // First, load the entries that will be deleted so callers can clean up image files.
         let selectSQL = """
-        SELECT id, created_at, source_app, kind, content, image_path, ocr_text, ocr_pending,
+        SELECT id, created_at, source_app, kind, content, file_urls, image_path, ocr_text, ocr_pending,
                ai_title, ai_title_pending
         FROM clipboard_entries
         WHERE created_at < ?
@@ -144,11 +147,12 @@ final class ClipboardDatabase {
                 let sourceApp = string(at: 2, from: selectStmt)
                 let kindString = string(at: 3, from: selectStmt) ?? ClipboardEntry.Kind.text.rawValue
                 let content = string(at: 4, from: selectStmt) ?? ""
-                let imagePath = string(at: 5, from: selectStmt)
-                let ocrText = string(at: 6, from: selectStmt) ?? ""
-                let isPending = sqlite3_column_int(selectStmt, 7) != 0
-                let aiTitle = string(at: 8, from: selectStmt) ?? ""
-                let aiTitlePending = sqlite3_column_int(selectStmt, 9) != 0
+                let fileURLs = decodeFileURLs(from: string(at: 5, from: selectStmt))
+                let imagePath = string(at: 6, from: selectStmt)
+                let ocrText = string(at: 7, from: selectStmt) ?? ""
+                let isPending = sqlite3_column_int(selectStmt, 8) != 0
+                let aiTitle = string(at: 9, from: selectStmt) ?? ""
+                let aiTitlePending = sqlite3_column_int(selectStmt, 10) != 0
 
                 let kind = ClipboardEntry.Kind(rawValue: kindString) ?? .text
                 removed.append(ClipboardEntry(
@@ -157,6 +161,7 @@ final class ClipboardDatabase {
                     date: Date(timeIntervalSince1970: createdAt),
                     sourceApp: sourceApp,
                     kind: kind,
+                    fileURLs: fileURLs,
                     imagePath: imagePath,
                     ocrText: ocrText,
                     isOCRPending: isPending,
@@ -193,9 +198,12 @@ final class ClipboardDatabase {
             source_app TEXT,
             kind TEXT NOT NULL,
             content TEXT,
+            file_urls TEXT,
             image_path TEXT,
             ocr_text TEXT,
-            ocr_pending INTEGER NOT NULL DEFAULT 0
+            ocr_pending INTEGER NOT NULL DEFAULT 0,
+            ai_title TEXT NOT NULL DEFAULT '',
+            ai_title_pending INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_entries_created_at ON clipboard_entries(created_at DESC);
@@ -206,6 +214,7 @@ final class ClipboardDatabase {
 
     private func migrateIfNeeded() {
         _ = sqlite3_exec(db, "ALTER TABLE clipboard_entries ADD COLUMN ocr_pending INTEGER NOT NULL DEFAULT 0;", nil, nil, nil)
+        _ = sqlite3_exec(db, "ALTER TABLE clipboard_entries ADD COLUMN file_urls TEXT;", nil, nil, nil)
         _ = sqlite3_exec(db, "ALTER TABLE clipboard_entries ADD COLUMN ai_title TEXT NOT NULL DEFAULT '';", nil, nil, nil)
         _ = sqlite3_exec(db, "ALTER TABLE clipboard_entries ADD COLUMN ai_title_pending INTEGER NOT NULL DEFAULT 0;", nil, nil, nil)
     }
@@ -222,6 +231,24 @@ final class ClipboardDatabase {
     private func string(at index: Int32, from statement: OpaquePointer?) -> String? {
         guard let cString = sqlite3_column_text(statement, index) else { return nil }
         return String(cString: cString)
+    }
+
+    private func encodeFileURLs(_ urls: [String]) -> String? {
+        guard !urls.isEmpty,
+              let data = try? JSONEncoder().encode(urls),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return encoded
+    }
+
+    private func decodeFileURLs(from value: String?) -> [String] {
+        guard let value,
+              let data = value.data(using: .utf8),
+              let urls = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return urls
     }
 }
 

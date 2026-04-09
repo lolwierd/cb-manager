@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-04-09
+
+### Fixed
+
+- Fixed paste-back targeting so `Return` waits for the previously focused app to reactivate before sending `⌘V` instead of firing into nowhere.
+- Preserved real Finder/file-url clipboard payloads for path entries, so copied files paste back as files instead of plain-text paths.
+- Re-expanded the visible row window around restored selections so delete/undo keeps focus on the restored row even in large filtered result sets.
+
 ### Performance
 
 - Moved clipboard filtering/ranking off the main actor so large histories and long clipboard items no longer block typing or overlay refresh while search results are recomputed.
@@ -14,7 +22,7 @@ All notable changes to this project are documented in this file.
 - Moved overlay preview details and image thumbnails off the SwiftUI render path so search, delete, selection, and preview interactions no longer decode images or scan large text synchronously on the main thread.
 - Suspended clipboard polling while the overlay is visible, reduced delete-cleanup churn, and stopped delete/undo from clearing live QMD results just to rerun the same query.
 - Replaced full-file image duplicate reads with sampled image signatures and switched image paste-back/preview loading away from synchronous full-image decodes.
-- Disabled QMD runtime search/index integration so overlay interactions now stay on the local fuzzy-search path and no longer spawn qmd work while the app is running.
+- Restored QMD runtime search/index integration behind the async fuzzy-first pipeline so overlay typing stays responsive while keyword/semantic results merge in later.
 - Made local search/regroup work cooperatively cancellable, raised search-input coalescing, and lowered overlay rebuild priority so quick search edits stop piling up stale rescans.
 - Reduced overlay layout churn by removing animated auto-scroll on search-driven selection changes, trimming inline preview text work, and rendering the overlay list through a rolling 100-entry window that expands as you scroll.
 - Replaced the custom overlay `ScrollView`/`LazyVStack` history pane with a native `List` while keeping search scoped to the full result set, which fixes the remaining fast-scroll lag without narrowing search coverage.

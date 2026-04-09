@@ -127,8 +127,8 @@ You can also right-click the app and choose **Open** once to allow launch.
 
 ## Search behavior
 
-Search currently uses only the local fuzzy ranking pipeline.
-The previous QMD augmentation path has been disabled to prioritize instant overlay responsiveness on large histories.
+Search uses an instant local fuzzy ranking pipeline first, then asynchronously appends QMD results without blocking typing or list refresh.
+QMD keyword search starts at 3+ characters, and semantic search starts at 5+ characters.
 To keep the overlay responsive, the live list starts with 100 rendered matches and expands the window as you scroll while still searching across the full result set.
 
 ## Troubleshooting

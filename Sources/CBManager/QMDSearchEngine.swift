@@ -1,6 +1,15 @@
 import Foundation
 
-actor QMDSearchEngine {
+protocol ClipboardQMDSearching: Sendable {
+    func isAvailable() async -> Bool
+    func bootstrap(entries: [ClipboardEntry]) async
+    func upsert(_ entry: ClipboardEntry) async
+    func remove(id: String) async
+    func keywordSearchIDs(query: String, limit: Int) async -> Set<String>
+    func semanticSearchIDs(query: String, limit: Int) async -> Set<String>
+}
+
+actor QMDSearchEngine: ClipboardQMDSearching {
     private let docsDirectory: URL
     private let collectionName = "cbmanager"
     private var collectionEnsured = false

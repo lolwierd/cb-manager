@@ -2,6 +2,19 @@ import AppKit
 import Carbon
 import SwiftUI
 
+enum VisibleEntryWindow {
+    static func expandedLimit(currentLimit: Int, totalCount: Int, targetIndex: Int?, pageSize: Int) -> Int {
+        guard totalCount > 0 else { return 0 }
+        guard let targetIndex, targetIndex >= currentLimit else {
+            return min(currentLimit, totalCount)
+        }
+
+        let requiredCount = targetIndex + 1
+        let roundedCount = ((requiredCount + pageSize - 1) / pageSize) * pageSize
+        return min(totalCount, max(currentLimit, roundedCount))
+    }
+}
+
 struct SearchOverlayView: View {
     nonisolated private static let inlinePreviewCharacterLimit = 4_000
     nonisolated private static let metadataScanCharacterLimit = 6_000
@@ -416,7 +429,17 @@ struct SearchOverlayView: View {
         rebuildVisibleEntriesTask?.cancel()
 
         let totalEntries = store.filteredEntries.count
-        let entriesSnapshot = Array(store.filteredEntries.prefix(visibleEntryLimit))
+        let targetSelectionID = pendingScrollSelectionID ?? selectedID
+        let targetIndex = targetSelectionID.flatMap { selectionID in
+            store.filteredEntries.firstIndex { $0.id == selectionID }
+        }
+        let effectiveVisibleLimit = VisibleEntryWindow.expandedLimit(
+            currentLimit: visibleEntryLimit,
+            totalCount: totalEntries,
+            targetIndex: targetIndex,
+            pageSize: Self.visibleEntriesPageSize
+        )
+        let entriesSnapshot = Array(store.filteredEntries.prefix(effectiveVisibleLimit))
         rebuildVisibleEntriesTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(20))
             guard !Task.isCancelled else { return }
@@ -426,6 +449,7 @@ struct SearchOverlayView: View {
 
             await MainActor.run {
                 isGrowingVisibleEntryWindow = false
+                visibleEntryLimit = effectiveVisibleLimit
                 totalFilteredEntryCount = totalEntries
                 groupedEntries = groups
                 flattenedEntryIDs = flattenedIDs
