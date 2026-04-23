@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-04-23
+
+### Fixed
+
+- Fixed overlay reopen not scrolling back to the top of the history when the previous session had been scrolled down. The open/reset path now deterministically resets the rendered window, selection, and scroll position regardless of how the async filter recompute races with the overlay-present signal.
+- Fixed keyboard arrow-nav occasionally skipping rows during active QMD result streaming by aligning `moveSelection` with the rendered snapshot and dropping viewport re-centering on passive list re-ranks.
+- Fixed a stale selection from the prior session surviving reopen — occasionally leaving the highlighted row off-screen with no way to reach the top via keyboard — by clearing it on the open path.
+- Fixed the first row being visually clipped under the section header after a reset by scrolling to an invisible top-sentinel row above the first section instead of to the first entry id.
+- Fixed undo-restore not centering the restored entry when the row wasn't yet in the rendered window. The centered-scroll intent is now sticky and replayed once the row becomes renderable, then cleared on selection drift / query / filter / reopen so it can't leak.
+- Fixed filter changes preserving a grown visible window against the new result set, which reintroduced list-jank on large histories.
+- Fixed preview (⌘Y) dismissal collapsing the overlay's selection and scroll by splitting the store's open/resume signals. Fresh opens still reset; resume from preview now preserves selection/scroll while still picking up any store updates (AI titles, OCR, new clips) that landed while the preview was in front.
+
 ### Changed
 
 - Updated GitHub Actions workflow dependencies to the latest upstream releases: `actions/checkout@v6.0.2` and `softprops/action-gh-release@v2.6.1`, removing the release job's Node 20 deprecation path.

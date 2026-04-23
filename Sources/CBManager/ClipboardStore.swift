@@ -232,6 +232,7 @@ final class ClipboardStore: ObservableObject {
     @Published private(set) var isQMDAvailable = false
     @Published private(set) var canUndoDelete = false
     @Published private(set) var overlayPresentedToken = UUID()
+    @Published private(set) var overlayResumedToken = UUID()
     @Published private(set) var lastRestoredEntryID: String?
     @Published private(set) var isOverlayVisible = false
 
@@ -563,15 +564,22 @@ final class ClipboardStore: ObservableObject {
             if selectedFilter != .all {
                 selectedFilter = .all
             }
-        } else if isQMDAvailable {
-            let normalizedQuery = ClipboardSearch.normalize(query)
-            let semanticNeeded = ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: normalizedQuery)
-            if !normalizedQuery.isEmpty,
-               (qmdKeywordIDs == nil || (semanticNeeded && qmdSemanticIDs == nil)) {
-                scheduleQMDSearch()
+            // Signal a fresh open — view should reset scroll and selection.
+            overlayPresentedToken = UUID()
+        } else {
+            if isQMDAvailable {
+                let normalizedQuery = ClipboardSearch.normalize(query)
+                let semanticNeeded = ClipboardSearch.shouldRunSemanticQMD(normalizedQuery: normalizedQuery)
+                if !normalizedQuery.isEmpty,
+                   (qmdKeywordIDs == nil || (semanticNeeded && qmdSemanticIDs == nil)) {
+                    scheduleQMDSearch()
+                }
             }
+            // Signal a resume (e.g. returning from ⌘Y preview) — view
+            // should refocus search but keep selection and scroll where
+            // they were.
+            overlayResumedToken = UUID()
         }
-        overlayPresentedToken = UUID()
     }
 
     func overlayDidClose() {

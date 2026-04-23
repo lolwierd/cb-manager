@@ -21,6 +21,11 @@ struct SearchOverlayView: View {
     nonisolated private static let initialVisibleEntries = 100
     nonisolated private static let visibleEntriesPageSize = 200
     nonisolated private static let visibleEntriesPrefetchThreshold = 24
+    // Invisible anchor row at the very top of the List. Scrolling to this
+    // id (rather than the first entry's id) lands above the first section
+    // header + content margins so the first row is never clipped.
+    // UUID strings can't collide with this literal.
+    nonisolated private static let topSentinelID = "__cbm_overlay_top_sentinel__"
 
     @ObservedObject var store: ClipboardStore
     let onClose: () -> Void
@@ -43,7 +48,31 @@ struct SearchOverlayView: View {
     @State private var totalFilteredEntryCount = 0
     @State private var isGrowingVisibleEntryWindow = false
     @State private var pendingScrollSelectionID: ClipboardEntry.ID?
+    @State private var pendingScrollAnchor: ScrollAnchor = .nearest
+    @State private var pendingOpenReset = false
+    @State private var lastObservedQuery = ""
+    @State private var lastObservedFilter: ClipboardEntry.Kind = .all
+    // Sticky "center this row when it lands in the rendered list" intent.
+    // Used for undo-restore: the restored row isn't in flattenedEntryIDs
+    // yet when lastRestoredEntryID fires, so the immediate .center scroll
+    // no-ops. When the follow-up rebuild includes the row, we replay the
+    // .center scroll so the user can see where it went.
+    @State private var pendingCenterRestoreID: ClipboardEntry.ID?
     @FocusState private var isSearchFocused: Bool
+
+    private enum ScrollAnchor {
+        /// Pin the row to the top of the viewport. Used for "reset to first"
+        /// transitions (open, query change) where the user expects to see
+        /// the top of the list.
+        case top
+        /// Center the row. Used when explicitly refocusing (e.g. undo
+        /// restore) — the user wants to see where the row went.
+        case center
+        /// Scroll minimally to make the row visible; no-op if already in
+        /// view. Used for keyboard nav and passive rebuilds so we don't
+        /// jerk the viewport around the selection.
+        case nearest
+    }
 
     private var selectedEntry: ClipboardEntry? {
         let entries = store.filteredEntries
@@ -88,10 +117,13 @@ struct SearchOverlayView: View {
             transaction.animation = nil
         }
         .onAppear {
+            pendingOpenReset = true
+            lastObservedQuery = store.query
+            lastObservedFilter = store.selectedFilter
             resetVisibleEntryWindow()
             scheduleVisibleEntriesRebuild(
                 selectLatestAfterRebuild: true,
-                scrollSelectionIntoViewAfterRebuild: true
+                scrollToTopAfterRebuild: true
             )
             focusSearchField()
             updateKeyMonitorForOverlayVisibility()
@@ -103,16 +135,58 @@ struct SearchOverlayView: View {
         }
         .onChange(of: store.filteredEntriesVersion) { _, _ in
             guard store.isOverlayVisible else { return }
-            resetVisibleEntryWindow()
-            scheduleVisibleEntriesRebuild(
-                refreshSelectionAfterRebuild: true,
-                scrollSelectionIntoViewAfterRebuild: true
-            )
+            let queryChanged = store.query != lastObservedQuery
+            let filterChanged = store.selectedFilter != lastObservedFilter
+            lastObservedQuery = store.query
+            lastObservedFilter = store.selectedFilter
+            if pendingOpenReset || queryChanged || filterChanged {
+                // A fresh context (open/reset, new query, new filter kind)
+                // invalidates any leftover center-restore intent from a
+                // prior undo and should collapse the visible window so we
+                // don't materialize the grown page against the new result
+                // set.
+                pendingCenterRestoreID = nil
+                resetVisibleEntryWindow()
+                scheduleVisibleEntriesRebuild(
+                    selectLatestAfterRebuild: true,
+                    scrollToTopAfterRebuild: true
+                )
+            } else {
+                // Passive data change (new clip, QMD re-rank, filter switch,
+                // AI title / OCR metadata update). Keep the current selection
+                // and ensure it stays on screen — but use a "nearest" anchor
+                // so we only scroll if the row is actually off-screen, to
+                // avoid centering jumps during keyboard nav.
+                scheduleVisibleEntriesRebuild(
+                    refreshSelectionAfterRebuild: true,
+                    scrollSelectionIntoViewAfterRebuild: true
+                )
+            }
         }
         .onChange(of: store.overlayPresentedToken) { _, _ in
+            pendingOpenReset = true
+            lastObservedQuery = store.query
+            lastObservedFilter = store.selectedFilter
+            pendingCenterRestoreID = nil
+            // Don't null out selectedID here — scheduleVisibleEntriesRebuild
+            // already ignores it when scrollToTopAfterRebuild is true, and
+            // clearing it would flash the preview pane through an extra
+            // nil → first-entry transition.
             resetVisibleEntryWindow()
             scheduleVisibleEntriesRebuild(
                 selectLatestAfterRebuild: true,
+                scrollToTopAfterRebuild: true
+            )
+            focusSearchField()
+        }
+        .onChange(of: store.overlayResumedToken) { _, _ in
+            // Resume from ⌘Y preview: user expects their selection and
+            // scroll position preserved, but any store updates that landed
+            // while the overlay was hidden (AI titles, OCR, new clips,
+            // etc.) need to be picked up — our filteredEntriesVersion
+            // handler no-ops while isOverlayVisible is false.
+            scheduleVisibleEntriesRebuild(
+                refreshSelectionAfterRebuild: true,
                 scrollSelectionIntoViewAfterRebuild: true
             )
             focusSearchField()
@@ -123,10 +197,23 @@ struct SearchOverlayView: View {
         .onChange(of: store.lastRestoredEntryID) { _, restoredID in
             guard let restoredID else { return }
             selectedID = restoredID
+            // Keep a sticky intent: the restored row may not be in
+            // flattenedEntryIDs yet (recompute hasn't rebuilt), so the
+            // immediate scroll attempt below can no-op. The follow-up
+            // rebuild completion will replay the .center scroll once the
+            // row is renderable.
+            pendingCenterRestoreID = restoredID
+            pendingScrollAnchor = .center
             pendingScrollSelectionID = restoredID
             focusSearchField()
         }
-        .onChange(of: selectedID) { _, _ in
+        .onChange(of: selectedID) { _, newID in
+            // Abandon a pending restore-center intent as soon as selection
+            // drifts away from the restore target (user navigated, filter
+            // dropped the entry, query change reassigned, etc.).
+            if let restoreID = pendingCenterRestoreID, newID != restoreID {
+                pendingCenterRestoreID = nil
+            }
             scheduleSelectedEntryDetailsUpdate()
         }
         .onMoveCommand(perform: handleMoveCommand)
@@ -203,6 +290,13 @@ struct SearchOverlayView: View {
     private var historyList: some View {
         ScrollViewReader { proxy in
             List {
+                Color.clear
+                    .frame(height: 1)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .id(Self.topSentinelID)
+
                 ForEach(groupedEntries) { group in
                     Section {
                         ForEach(group.items) { entry in
@@ -225,14 +319,23 @@ struct SearchOverlayView: View {
             .scrollContentBackground(.hidden)
             .background(Color.clear)
             .onAppear {
-                if let selectedID {
-                    proxy.scrollTo(selectedID, anchor: .top)
-                }
+                // Scroll to the top sentinel on first materialization so
+                // the first row isn't clipped under the section header /
+                // content margins. The outer .onAppear also queues this
+                // via the rebuild, so this is belt-and-suspenders.
+                proxy.scrollTo(Self.topSentinelID, anchor: .top)
             }
             .onChange(of: pendingScrollSelectionID) { _, requestedID in
                 guard let requestedID else { return }
+                let anchor: UnitPoint?
+                switch pendingScrollAnchor {
+                case .top: anchor = .top
+                case .center: anchor = .center
+                case .nearest: anchor = nil
+                }
                 pendingScrollSelectionID = nil
-                proxy.scrollTo(requestedID, anchor: .center)
+                pendingScrollAnchor = .nearest
+                proxy.scrollTo(requestedID, anchor: anchor)
             }
         }
     }
@@ -424,12 +527,17 @@ struct SearchOverlayView: View {
         refreshSelectionAfterRebuild: Bool = false,
         selectLatestAfterRebuild: Bool = false,
         scrollSelectionIntoViewAfterRebuild: Bool = false,
+        scrollToTopAfterRebuild: Bool = false,
         refreshSelectedEntryDetailsAfterRebuild: Bool = true
     ) {
         rebuildVisibleEntriesTask?.cancel()
 
         let totalEntries = store.filteredEntries.count
-        let targetSelectionID = pendingScrollSelectionID ?? selectedID
+        // When we're about to reset scroll to the top, don't let a stale
+        // selection expand the window to pull in far-down entries.
+        let targetSelectionID: ClipboardEntry.ID? = scrollToTopAfterRebuild
+            ? nil
+            : (pendingScrollSelectionID ?? selectedID)
         let targetIndex = targetSelectionID.flatMap { selectionID in
             store.filteredEntries.firstIndex { $0.id == selectionID }
         }
@@ -453,14 +561,63 @@ struct SearchOverlayView: View {
                 totalFilteredEntryCount = totalEntries
                 groupedEntries = groups
                 flattenedEntryIDs = flattenedIDs
+
+                var selectionWasReassigned = false
                 if selectLatestAfterRebuild {
                     selectLatestEntry()
                 } else if refreshSelectionAfterRebuild {
-                    refreshSelection()
+                    selectionWasReassigned = refreshSelection()
                 }
-                if scrollSelectionIntoViewAfterRebuild {
-                    pendingScrollSelectionID = selectedID
+
+                if let restoreID = pendingCenterRestoreID,
+                   selectedID == restoreID,
+                   flattenedIDs.contains(restoreID) {
+                    // Undo-restore asked for a centered scroll earlier but
+                    // the row wasn't rendered yet. Replay it now.
+                    // Only fire if the restore target is still the active
+                    // selection — if the user (or a filter change) moved
+                    // the selection elsewhere, the intent is stale.
+                    pendingCenterRestoreID = nil
+                    pendingScrollAnchor = .center
+                    pendingScrollSelectionID = restoreID
+                } else if scrollToTopAfterRebuild {
+                    // Clear the open-reset flag unconditionally — if the list
+                    // is empty there's no first row to scroll to, but a later
+                    // data change must not reuse the reset branch for a
+                    // passive update.
+                    pendingOpenReset = false
+                    if !flattenedIDs.isEmpty {
+                        // Scroll to the invisible sentinel row above the
+                        // first section so the first entry is fully visible
+                        // under the section header + content margins,
+                        // rather than clipped against the viewport top.
+                        pendingScrollAnchor = .top
+                        pendingScrollSelectionID = Self.topSentinelID
+                    }
+                } else if selectionWasReassigned, !flattenedIDs.isEmpty {
+                    // Selection was force-moved (e.g. filter change dropped
+                    // the old selection). Surface the new selection by
+                    // scrolling back to the top. Preserve any concurrently
+                    // queued scroll request only if its target is actually
+                    // renderable — otherwise it would no-op and hide the
+                    // reassigned selection behind the old viewport.
+                    let pendingIsRenderable: Bool = {
+                        guard let pending = pendingScrollSelectionID else { return false }
+                        return pending == Self.topSentinelID || flattenedIDs.contains(pending)
+                    }()
+                    if !pendingIsRenderable {
+                        pendingScrollAnchor = .top
+                        pendingScrollSelectionID = Self.topSentinelID
+                    }
+                } else if scrollSelectionIntoViewAfterRebuild, let sid = selectedID {
+                    // Don't clobber a stronger pending scroll request that
+                    // was set just before this rebuild landed.
+                    if pendingScrollSelectionID == nil {
+                        pendingScrollAnchor = .nearest
+                        pendingScrollSelectionID = sid
+                    }
                 }
+
                 if refreshSelectedEntryDetailsAfterRebuild {
                     scheduleSelectedEntryDetailsUpdate()
                 }
@@ -520,12 +677,14 @@ struct SearchOverlayView: View {
         selectedID = flattenedEntryIDs.first
     }
 
-    private func refreshSelection() {
+    @discardableResult
+    private func refreshSelection() -> Bool {
         if let selectedID,
            flattenedEntryIDs.contains(selectedID) {
-            return
+            return false
         }
         selectedID = flattenedEntryIDs.first
+        return true
     }
 
     private func selectedEntry(matching id: ClipboardEntry.ID) -> ClipboardEntry? {
@@ -639,18 +798,48 @@ struct SearchOverlayView: View {
     }
 
     private func moveSelection(by delta: Int) {
+        // Navigate against the rendered snapshot (flattenedEntryIDs), not
+        // the live filtered list. If we navigated against store.filteredEntries
+        // directly, a pending re-rank could pick a row that's not in the
+        // List yet — the highlight would vanish and Return could target a
+        // row the user never saw selected. Staying aligned with what's on
+        // screen is the less surprising behavior.
         guard !flattenedEntryIDs.isEmpty else { return }
 
-        guard let selectedID,
-              let idx = flattenedEntryIDs.firstIndex(of: selectedID) else {
-            self.selectedID = flattenedEntryIDs.first
-            pendingScrollSelectionID = self.selectedID
+        guard let currentID = selectedID,
+              let idx = flattenedEntryIDs.firstIndex(of: currentID) else {
+            let firstID = flattenedEntryIDs.first
+            self.selectedID = firstID
+            pendingScrollAnchor = .nearest
+            pendingScrollSelectionID = firstID
             return
         }
 
         let newIndex = min(max(idx + delta, 0), flattenedEntryIDs.count - 1)
-        self.selectedID = flattenedEntryIDs[newIndex]
-        pendingScrollSelectionID = self.selectedID
+        let newID = flattenedEntryIDs[newIndex]
+        self.selectedID = newID
+        pendingScrollAnchor = .nearest
+        pendingScrollSelectionID = newID
+
+        // If the new selection is near the end of the currently rendered
+        // window, grow it proactively so the next few Down presses don't
+        // stall at the edge.
+        if newIndex >= flattenedEntryIDs.count - Self.visibleEntriesPrefetchThreshold,
+           !isGrowingVisibleEntryWindow,
+           store.filteredEntries.count > flattenedEntryIDs.count {
+            let newLimit = min(
+                max(visibleEntryLimit, flattenedEntryIDs.count) + Self.visibleEntriesPageSize,
+                store.filteredEntries.count
+            )
+            if newLimit > visibleEntryLimit {
+                isGrowingVisibleEntryWindow = true
+                visibleEntryLimit = newLimit
+                scheduleVisibleEntriesRebuild(
+                    scrollSelectionIntoViewAfterRebuild: true,
+                    refreshSelectedEntryDetailsAfterRebuild: false
+                )
+            }
+        }
     }
 
     @ViewBuilder
