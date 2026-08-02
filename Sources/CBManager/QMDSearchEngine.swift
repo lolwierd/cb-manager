@@ -15,6 +15,8 @@ actor QMDSearchEngine: ClipboardQMDSearching {
     private var collectionEnsured = false
     private var updateTask: Task<Void, Never>?
     private var embedTask: Task<Void, Never>?
+    private var pendingUpserts: [ClipboardEntry.ID: ClipboardEntry] = [:]
+    private var upsertFlushTask: Task<Void, Never>?
     private var pathResolved = false
 
     init(baseDirectory: URL) {
@@ -27,12 +29,10 @@ actor QMDSearchEngine: ClipboardQMDSearching {
     private func resolvePathIfNeeded() async {
         guard !pathResolved else { return }
         pathResolved = true
-        resolvedQMDPath = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .background).async {
-                let shellPATH = Self.resolveShellPATH()
-                continuation.resume(returning: Self.findQMD(in: shellPATH))
-            }
-        }
+        resolvedQMDPath = await ShellPathResolver.shared.findExecutable(
+            named: "qmd",
+            mode: .interactiveLogin
+        )
     }
 
     func isAvailable() async -> Bool {
@@ -64,13 +64,22 @@ actor QMDSearchEngine: ClipboardQMDSearching {
 
     func upsert(_ entry: ClipboardEntry) async {
         await ensureCollection()
-        writeDocument(for: entry)
-        scheduleUpdate()
-        scheduleEmbed(delay: .seconds(10))
+        pendingUpserts[entry.id] = entry
+        upsertFlushTask?.cancel()
+        upsertFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            await self?.flushPendingUpserts()
+        }
     }
 
     func remove(id: String) async {
         await ensureCollection()
+        pendingUpserts.removeValue(forKey: id)
+        if pendingUpserts.isEmpty {
+            upsertFlushTask?.cancel()
+            upsertFlushTask = nil
+        }
         let file = docsDirectory.appendingPathComponent("\(id).md")
         try? FileManager.default.removeItem(at: file)
         scheduleUpdate()
@@ -125,6 +134,19 @@ actor QMDSearchEngine: ClipboardQMDSearching {
         }
     }
 
+    private func flushPendingUpserts() {
+        guard !pendingUpserts.isEmpty else { return }
+        let entries = pendingUpserts.values
+        pendingUpserts.removeAll(keepingCapacity: true)
+        upsertFlushTask = nil
+
+        for entry in entries {
+            writeDocument(for: entry)
+        }
+        scheduleUpdate()
+        scheduleEmbed(delay: .seconds(10))
+    }
+
     private func scheduleEmbed(delay: Duration) {
         embedTask?.cancel()
         embedTask = Task { [weak self] in
@@ -159,41 +181,7 @@ actor QMDSearchEngine: ClipboardQMDSearching {
         try? content.write(to: file, atomically: true, encoding: .utf8)
     }
 
-    /// Resolve the user's full login-shell PATH (GUI apps inherit a minimal PATH).
-    /// Computed fresh each time QMDSearchEngine is created (i.e. each app launch).
     private var resolvedQMDPath: String?
-
-    private static func resolveShellPATH() -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: shell)
-        // Interactive login shell (-ilc) so tools installed via version
-        // managers like nvm/fnm (which initialize in .zshrc) are found.
-        proc.arguments = ["-ilc", "echo $PATH"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            if let resolved = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines), !resolved.isEmpty {
-                return resolved
-            }
-        } catch {}
-        return ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-    }
-
-    private static func findQMD(in shellPATH: String) -> String? {
-        for dir in shellPATH.split(separator: ":").map(String.init) {
-            let candidate = "\(dir)/qmd"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
-    }
 
     private func runQMD(_ arguments: [String]) async -> String? {
         // Use withTaskCancellationHandler so we kill the process when the Task is cancelled.

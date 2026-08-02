@@ -15,12 +15,37 @@ enum VisibleEntryWindow {
     }
 }
 
+enum VisualEntryOrder {
+    static func idsByDateSections(from entries: [ClipboardEntry], calendar: Calendar = .current) -> [ClipboardEntry.ID] {
+        var today: [ClipboardEntry.ID] = []
+        var yesterday: [ClipboardEntry.ID] = []
+        var earlier: [ClipboardEntry.ID] = []
+
+        today.reserveCapacity(entries.count)
+        yesterday.reserveCapacity(min(entries.count, 64))
+        earlier.reserveCapacity(entries.count)
+
+        for entry in entries {
+            if calendar.isDateInToday(entry.date) {
+                today.append(entry.id)
+            } else if calendar.isDateInYesterday(entry.date) {
+                yesterday.append(entry.id)
+            } else {
+                earlier.append(entry.id)
+            }
+        }
+
+        return today + yesterday + earlier
+    }
+}
+
 struct SearchOverlayView: View {
     nonisolated private static let inlinePreviewCharacterLimit = 4_000
     nonisolated private static let metadataScanCharacterLimit = 6_000
     nonisolated private static let initialVisibleEntries = 100
     nonisolated private static let visibleEntriesPageSize = 200
     nonisolated private static let visibleEntriesPrefetchThreshold = 24
+    nonisolated private static let historyTopPadding: CGFloat = 18
     // Invisible anchor row at the very top of the List. Scrolling to this
     // id (rather than the first entry's id) lands above the first section
     // header + content margins so the first row is never clipped.
@@ -75,9 +100,8 @@ struct SearchOverlayView: View {
     }
 
     private var selectedEntry: ClipboardEntry? {
-        let entries = store.filteredEntries
-        guard let selectedID else { return entries.first }
-        return entries.first { $0.id == selectedID } ?? entries.first
+        guard let selectedID else { return store.filteredEntries.first }
+        return store.filteredEntry(for: selectedID) ?? store.filteredEntries.first
     }
 
     private var filterTitle: String {
@@ -117,6 +141,8 @@ struct SearchOverlayView: View {
             transaction.animation = nil
         }
         .onAppear {
+            selectedID = nil
+            selectedEntryDetails = nil
             pendingOpenReset = true
             lastObservedQuery = store.query
             lastObservedFilter = store.selectedFilter
@@ -164,20 +190,32 @@ struct SearchOverlayView: View {
             }
         }
         .onChange(of: store.overlayPresentedToken) { _, _ in
+            selectedID = nil
+            selectedEntryDetails = nil
             pendingOpenReset = true
             lastObservedQuery = store.query
             lastObservedFilter = store.selectedFilter
             pendingCenterRestoreID = nil
-            // Don't null out selectedID here — scheduleVisibleEntriesRebuild
-            // already ignores it when scrollToTopAfterRebuild is true, and
-            // clearing it would flash the preview pane through an extra
-            // nil → first-entry transition.
             resetVisibleEntryWindow()
             scheduleVisibleEntriesRebuild(
                 selectLatestAfterRebuild: true,
                 scrollToTopAfterRebuild: true
             )
             focusSearchField()
+        }
+        .onChange(of: store.query) { _, _ in
+            guard store.isOverlayVisible else { return }
+            selectedID = nil
+            selectedEntryDetails = nil
+            pendingCenterRestoreID = nil
+            resetVisibleEntryWindow()
+        }
+        .onChange(of: store.selectedFilter) { _, _ in
+            guard store.isOverlayVisible else { return }
+            selectedID = nil
+            selectedEntryDetails = nil
+            pendingCenterRestoreID = nil
+            resetVisibleEntryWindow()
         }
         .onChange(of: store.overlayResumedToken) { _, _ in
             // Resume from ⌘Y preview: user expects their selection and
@@ -298,19 +336,16 @@ struct SearchOverlayView: View {
                     .id(Self.topSentinelID)
 
                 ForEach(groupedEntries) { group in
-                    Section {
-                        ForEach(group.items) { entry in
-                            row(for: entry)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                        }
-                    } header: {
-                        Text(group.title)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
-                            .padding(.horizontal, 14)
+                    groupHeader(group.title)
+                        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 6, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+
+                    ForEach(group.items) { entry in
+                        row(for: entry)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
                 }
             }
@@ -318,6 +353,9 @@ struct SearchOverlayView: View {
             .contentMargins(.vertical, 10, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Color.clear.frame(height: Self.historyTopPadding)
+            }
             .onAppear {
                 // Scroll to the top sentinel on first materialization so
                 // the first row isn't clipped under the section header /
@@ -338,6 +376,15 @@ struct SearchOverlayView: View {
                 proxy.scrollTo(requestedID, anchor: anchor)
             }
         }
+    }
+
+    private func groupHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
     }
 
     @ViewBuilder
@@ -538,9 +585,7 @@ struct SearchOverlayView: View {
         let targetSelectionID: ClipboardEntry.ID? = scrollToTopAfterRebuild
             ? nil
             : (pendingScrollSelectionID ?? selectedID)
-        let targetIndex = targetSelectionID.flatMap { selectionID in
-            store.filteredEntries.firstIndex { $0.id == selectionID }
-        }
+        let targetIndex = targetSelectionID.flatMap { store.filteredEntryIndex(for: $0) }
         let effectiveVisibleLimit = VisibleEntryWindow.expandedLimit(
             currentLimit: visibleEntryLimit,
             totalCount: totalEntries,
@@ -549,7 +594,6 @@ struct SearchOverlayView: View {
         )
         let entriesSnapshot = Array(store.filteredEntries.prefix(effectiveVisibleLimit))
         rebuildVisibleEntriesTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .milliseconds(20))
             guard !Task.isCancelled else { return }
 
             let (groups, flattenedIDs) = Self.makeEntryGroups(from: entriesSnapshot)
@@ -630,12 +674,10 @@ struct SearchOverlayView: View {
         var today: [EntryListItem] = []
         var yesterday: [EntryListItem] = []
         var earlier: [EntryListItem] = []
-        var flattenedIDs: [ClipboardEntry.ID] = []
 
         today.reserveCapacity(entries.count)
         yesterday.reserveCapacity(min(entries.count, 64))
         earlier.reserveCapacity(entries.count)
-        flattenedIDs.reserveCapacity(entries.count)
 
         for (index, entry) in entries.enumerated() {
             if index.isMultiple(of: 64), Task.isCancelled {
@@ -643,7 +685,6 @@ struct SearchOverlayView: View {
             }
 
             let listItem = EntryListItem(entry: entry)
-            flattenedIDs.append(listItem.id)
             if calendar.isDateInToday(entry.date) {
                 today.append(listItem)
             } else if calendar.isDateInYesterday(entry.date) {
@@ -664,6 +705,7 @@ struct SearchOverlayView: View {
         if !earlier.isEmpty {
             groups.append(EntryGroup(title: "Earlier", items: earlier))
         }
+        let flattenedIDs = VisualEntryOrder.idsByDateSections(from: entries, calendar: calendar)
         return (groups, flattenedIDs)
     }
 
@@ -688,7 +730,7 @@ struct SearchOverlayView: View {
     }
 
     private func selectedEntry(matching id: ClipboardEntry.ID) -> ClipboardEntry? {
-        store.filteredEntries.first { $0.id == id }
+        store.filteredEntry(for: id)
     }
 
     private func details(for entry: ClipboardEntry) -> SelectedEntryDetails? {

@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed intermittent overlay no-shows by making panel presentation state explicit, unhiding and activating the accessory app before presentation, and recovering panels AppKit considered visible but WindowServer had removed from screen.
+- Added complete Carbon hotkey registration error handling and diagnostics instead of silently accepting a missing event handler or failed fallback shortcut.
+- Reduced common-path latency with WAL-backed SQLite writes, bounded image-signature caching, constant-time selected-entry lookup, coalesced QMD document writes, and background image persistence.
+- Reused shell PATH resolution and pinned packaging scripts to the supported macOS 26 SDK when the installed macOS 27 Command Line Tools lacks its SwiftUI macro plugin.
+- Made local fuzzy search recompute immediately on each query edit while QMD continues to merge in later, removing the visible delayed selection jump during typing.
+- Reset overlay selection immediately on fresh opens, query changes, and filter changes so stale row IDs from a previous context cannot appear as random highlighted entries.
+- Fixed arrow-key navigation in grouped search results so Down/Up follows the visible Today / Yesterday / Earlier row order instead of the pre-grouped search-rank order.
+- Replaced sticky native list section headers with regular header rows so manually scrolling back to the top no longer clips the first result under the Today header.
+- Added real top spacer room to the overlay history list so the first date header/separator is fully visible at the manual scroll top.
+- Kept clipboard polling active while the overlay is visible and held a lightweight activity for monitoring so clipboard capture does not appear to stop until the app is activated again.
+
 ## [0.5.5] - 2026-04-23
 
 ### Fixed

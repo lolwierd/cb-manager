@@ -2,6 +2,12 @@ import AppKit
 import Carbon
 import SwiftUI
 
+enum OverlayPresentationDecision {
+    static func shouldHide(isPresented: Bool, panelVisible: Bool, appActive: Bool) -> Bool {
+        isPresented && panelVisible && appActive
+    }
+}
+
 @MainActor
 final class OverlayPanelController: NSObject, NSWindowDelegate {
     private let store: ClipboardStore
@@ -15,6 +21,7 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
     private var isProgrammaticMove = false
     private var mouseUpMonitor: Any?
     private var focusRestoreWorkItem: DispatchWorkItem?
+    private var isPresented = false
 
     private let panelSize = NSSize(width: 980, height: 620)
     private let snapThreshold: CGFloat = 12
@@ -26,10 +33,20 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         self.store = store
         super.init()
         _ = panel // prewarm window so first open is instant
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidResignActive),
+            name: NSApplication.didResignActiveNotification,
+            object: NSApp
+        )
     }
 
     func toggle() {
-        if panel.isVisible {
+        if OverlayPresentationDecision.shouldHide(
+            isPresented: isPresented,
+            panelVisible: panel.isVisible,
+            appActive: NSRunningApplication.current.isActive
+        ) {
             hide()
         } else {
             show()
@@ -53,20 +70,34 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
             panel.setFrame(panelFrame(for: screen), display: false)
         }
 
+        isPresented = true
         panel.alphaValue = 1
+        NSApp.unhide(nil)
+        let activated = NSRunningApplication.current.activate(options: [.activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        // A global Carbon event can arrive while this accessory app is inactive.
+        // Make the panel visible immediately instead of racing activation.
+        panel.orderFrontRegardless()
+        panel.makeKey()
         store.overlayDidOpen(resetSearch: resetSearch)
+        PasteDiagnostics.log(
+            "Overlay show requested activated=\(activated) appActive=\(NSRunningApplication.current.isActive) panelVisible=\(panel.isVisible) panelKey=\(panel.isKeyWindow)"
+        )
+
+        DispatchQueue.main.async { [weak self] in
+            self?.finishPresentationIfNeeded()
+        }
     }
 
     func hide(restoreFocus: Bool = true) {
         alignmentGuides.hideAll()
         removeMouseUpMonitor()
-        guard panel.isVisible else { return }
+        guard isPresented || panel.isVisible || store.isOverlayVisible else { return }
 
         focusRestoreWorkItem?.cancel()
         focusRestoreWorkItem = nil
 
+        isPresented = false
         panel.orderOut(nil)
         panel.alphaValue = 1
         store.overlayDidClose()
@@ -94,11 +125,38 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
               window == panel,
               !window.isVisible,
               store.isOverlayVisible else { return }
+        isPresented = false
         alignmentGuides.hideAll()
         removeMouseUpMonitor()
         focusRestoreWorkItem?.cancel()
         focusRestoreWorkItem = nil
         store.overlayDidClose()
+    }
+
+    @objc private func applicationDidResignActive(_ notification: Notification) {
+        guard isPresented else { return }
+        hide(restoreFocus: false)
+    }
+
+    private func finishPresentationIfNeeded() {
+        guard isPresented else { return }
+
+        if !NSRunningApplication.current.isActive {
+            NSApp.unhide(nil)
+            _ = NSRunningApplication.current.activate(options: [.activateAllWindows])
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
+        if !panel.isKeyWindow {
+            panel.makeKey()
+        }
+
+        PasteDiagnostics.log(
+            "Overlay presentation settled appActive=\(NSRunningApplication.current.isActive) panelVisible=\(panel.isVisible) panelKey=\(panel.isKeyWindow)"
+        )
     }
 
     func windowDidMove(_ notification: Notification) {
@@ -317,7 +375,10 @@ final class OverlayPanelController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.hidesOnDeactivate = true
+        panel.becomesKeyOnlyIfNeeded = false
+        // Deactivation is handled explicitly so controller state and the
+        // window server cannot disagree about whether the overlay is open.
+        panel.hidesOnDeactivate = false
         panel.onEscape = { [weak self] in self?.hide() }
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]

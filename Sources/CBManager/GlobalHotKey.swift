@@ -1,5 +1,6 @@
 import Carbon
 import Foundation
+import OSLog
 
 final class GlobalHotKey {
     private var hotKeyRef: EventHotKeyRef?
@@ -7,6 +8,7 @@ final class GlobalHotKey {
     var onPressed: (() -> Void)?
 
     private static let hotKeyID = EventHotKeyID(signature: OSType(0x43424D47), id: 1) // CBMG
+    private static let logger = Logger(subsystem: "com.cbmanager.app", category: "hotkey")
 
     @discardableResult
     func register(_ shortcut: HotKeyShortcut = .fallback) -> Bool {
@@ -15,7 +17,7 @@ final class GlobalHotKey {
         var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
 
         let selfPointer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        InstallEventHandler(
+        let handlerStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, userData in
                 guard let event, let userData else { return noErr }
@@ -47,6 +49,12 @@ final class GlobalHotKey {
             &handlerRef
         )
 
+        guard handlerStatus == noErr, handlerRef != nil else {
+            Self.logger.error("InstallEventHandler failed status=\(handlerStatus)")
+            unregister()
+            return false
+        }
+
         let status = RegisterEventHotKey(
             shortcut.keyCode,
             shortcut.modifiers,
@@ -56,7 +64,18 @@ final class GlobalHotKey {
             &hotKeyRef
         )
 
-        return status == noErr
+        guard status == noErr, hotKeyRef != nil else {
+            Self.logger.error(
+                "RegisterEventHotKey failed status=\(status) keyCode=\(shortcut.keyCode) modifiers=\(shortcut.modifiers)"
+            )
+            unregister()
+            return false
+        }
+
+        Self.logger.notice(
+            "Registered global hotkey keyCode=\(shortcut.keyCode) modifiers=\(shortcut.modifiers)"
+        )
+        return true
     }
 
     func unregister() {

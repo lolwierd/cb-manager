@@ -188,6 +188,11 @@ final class ClipboardDatabase {
             db = nil
             return
         }
+
+        sqlite3_busy_timeout(db, 5_000)
+        _ = sqlite3_exec(db, "PRAGMA journal_mode = WAL;", nil, nil, nil)
+        _ = sqlite3_exec(db, "PRAGMA synchronous = NORMAL;", nil, nil, nil)
+        _ = sqlite3_exec(db, "PRAGMA temp_store = MEMORY;", nil, nil, nil)
     }
 
     private func createSchema() {
@@ -207,6 +212,8 @@ final class ClipboardDatabase {
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_entries_created_at ON clipboard_entries(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clipboard_entries_kind ON clipboard_entries(kind);
+        CREATE INDEX IF NOT EXISTS idx_clipboard_entries_source_app ON clipboard_entries(source_app);
         """
 
         sqlite3_exec(db, sql, nil, nil, nil)

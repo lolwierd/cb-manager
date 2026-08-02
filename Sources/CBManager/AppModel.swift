@@ -59,7 +59,9 @@ final class AppModel {
 
         if !hotKey.register(shortcut) {
             shortcut = .fallback
-            _ = hotKey.register(.fallback)
+            if !hotKey.register(.fallback) {
+                PasteDiagnostics.log("Failed to register configured and fallback global shortcuts")
+            }
         }
 
         statusBar.onOpen = { [weak self] in

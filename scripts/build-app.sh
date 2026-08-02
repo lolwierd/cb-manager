@@ -11,6 +11,12 @@ ICON_PATH="$RES_DIR/AppIcon.icns"
 
 VERSION="${1:-1.0.0}"
 
+# CLT 27 currently omits the SwiftUIMacros plugin required by its SwiftUI
+# interface. Build against the supported macOS 26 SDK when it is available.
+if [[ -z "${SDKROOT:-}" && -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk ]]; then
+  export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
+fi
+
 cd "$ROOT_DIR"
 
 echo "[cb-manager] Building release binary..."

@@ -1,0 +1,1584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Cost of a Paste — CB Manager · Performance Audit · 2026·04·19</title>
+<meta name="description" content="A performance audit of CB Manager. Fourteen accrued costs in a macOS clipboard manager, ordered by what they take and how often they take it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..800,30..100&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..800;1,8..60,300..800&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+
+/* =============================================================
+   The Cost of a Paste — CB Manager Performance Ledger
+   Concept: each finding is a line item in an accounting of
+   hidden taxes on clipboard interactions. Editorial serif,
+   warm ink palette, severity as marginalia, not JIRA badges.
+   ============================================================= */
+
+:root {
+  /* INK — background, darkest first */
+  --ink-abyss:    #0e0c0b;   /* behind paper */
+  --ink-bg:       #13110f;   /* body */
+  --ink-surface:  #1a1714;   /* subtle card */
+  --ink-card:     #211d19;   /* stronger card */
+  --ink-rule:     #2a2520;   /* hairlines */
+  --ink-rule-mid: #3a342d;   /* stronger rule */
+
+  /* PAPER — type in four steps, warmest at top */
+  --paper:         #ece3d2;   /* primary */
+  --paper-quiet:   #c0b4a0;   /* dek, lede-ish */
+  --paper-muted:   #89806f;   /* meta, caption */
+  --paper-dim:     #5a5145;   /* edge, footnote */
+  --paper-whisper: #3d382f;   /* disabled, footer */
+
+  /* ACCENT — gold for the editorial tooling */
+  --gold:          #c9a25b;
+  --gold-dim:      #8e7343;
+
+  /* SEVERITY — derived from heat & oxidation metaphors,
+     not fire-alarm UX defaults. Each carries a "bg" for
+     fills and a "fg" for the text/rule. */
+  --sev-crit-fg:   #e0563c;   /* ember rust */
+  --sev-crit-bg:   rgba(224, 86, 60, 0.10);
+  --sev-crit-rule: rgba(224, 86, 60, 0.38);
+
+  --sev-high-fg:   #dc8a31;   /* amber flare */
+  --sev-high-bg:   rgba(220, 138, 49, 0.10);
+  --sev-high-rule: rgba(220, 138, 49, 0.34);
+
+  --sev-med-fg:    #b09349;   /* patina brass */
+  --sev-med-bg:    rgba(176, 147, 73, 0.10);
+  --sev-med-rule:  rgba(176, 147, 73, 0.30);
+
+  --sev-low-fg:    #7d939a;   /* cool slate */
+  --sev-low-bg:    rgba(125, 147, 154, 0.10);
+  --sev-low-rule:  rgba(125, 147, 154, 0.26);
+
+  /* DIFF — for fix code blocks */
+  --diff-add:      #98b583;
+  --diff-remove:   #b07163;
+  --diff-neutral:  var(--paper-muted);
+
+  /* TYPE */
+  --f-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --f-body:    'Source Serif 4', Charter, 'Iowan Old Style', Georgia, serif;
+  --f-mono:    'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+
+  --fs-display: clamp(2.8rem, 10vw, 6.8rem);
+  --fs-dek:     clamp(1.08rem, 1.35vw, 1.3rem);
+  --fs-h2:      clamp(1.4rem, 2.3vw, 2.15rem);
+  --fs-h3:      clamp(1.18rem, 1.4vw, 1.45rem);
+  --fs-body:    1.0625rem;    /* 17px */
+  --fs-small:   0.875rem;
+  --fs-micro:   0.75rem;
+  --fs-mono-body: 0.92rem;
+  --fs-mono-small: 0.78rem;
+
+  --lh-tight:   1.1;
+  --lh-snug:    1.3;
+  --lh-body:    1.62;
+  --lh-prose:   1.72;
+
+  /* LAYOUT */
+  --col-page:   min(1240px, 100% - 2.2rem);
+  --col-prose:  min(72ch, 100%);
+  --gutter:     clamp(1.1rem, 2.8vw, 2.2rem);
+  --rhythm:     clamp(2.4rem, 5vw, 4.2rem);
+}
+
+/* ---------- Reset ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--ink-bg);
+  color: var(--paper);
+  font-family: var(--f-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-optical-sizing: auto;
+  font-feature-settings: 'ss01', 'onum', 'liga';
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.003em;
+}
+h1, h2, h3, h4 { margin: 0; line-height: var(--lh-snug); }
+p { margin: 0 0 1em; }
+a { color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-dim); transition: color .15s, border-color .15s; }
+a:hover { color: var(--paper); border-bottom-color: var(--paper); }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 2px; }
+
+::selection { background: var(--gold); color: var(--ink-bg); }
+
+code, kbd { font-family: var(--f-mono); font-size: var(--fs-mono-body); }
+
+/* ---------- Page container ---------- */
+.page {
+  width: var(--col-page);
+  margin: 0 auto;
+  padding-block: clamp(2.4rem, 6vw, 5rem);
+}
+
+/* Narrow column for prose-heavy reading */
+.prose { max-width: var(--col-prose); }
+
+/* ---------- Masthead ---------- */
+.masthead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 1rem;
+  padding-bottom: 1.2rem;
+  margin-bottom: 2.8rem;
+  border-bottom: 1px solid var(--ink-rule-mid);
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-muted);
+}
+.masthead .mast-left span + span::before {
+  content: '·';
+  margin: 0 0.6em;
+  color: var(--paper-dim);
+}
+.masthead .folio-num {
+  color: var(--gold);
+}
+
+/* ---------- Cover ---------- */
+.cover {
+  margin-bottom: clamp(3rem, 7vw, 5.5rem);
+}
+.cover .kicker {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 1.3rem;
+}
+.cover h1 {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-size: var(--fs-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 40, 'wght' 520;
+  letter-spacing: -0.028em;
+  line-height: 0.93;
+  color: var(--paper);
+  max-width: 17ch;
+  margin-bottom: 1.4rem;
+}
+.cover h1 em {
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 90, 'wght' 480;
+  color: var(--gold);
+}
+.cover .dek {
+  font-family: var(--f-body);
+  font-size: var(--fs-dek);
+  line-height: var(--lh-snug);
+  color: var(--paper-quiet);
+  max-width: 46ch;
+  font-style: italic;
+  font-weight: 300;
+}
+.cover .coverline {
+  margin-top: 1.8rem;
+  display: flex;
+  gap: 1.8rem;
+  flex-wrap: wrap;
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  color: var(--paper-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cover .coverline strong { color: var(--paper); font-weight: 500; }
+
+/* ---------- Section heads ---------- */
+.section-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 1.5rem;
+  margin-bottom: 1.6rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--ink-rule-mid);
+}
+.section-head .marker {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.section-head h2 {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-variation-settings: 'opsz' 60, 'SOFT' 50, 'wght' 540;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.015em;
+  color: var(--paper);
+}
+.section-head .right-note {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  color: var(--paper-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+section { margin-bottom: var(--rhythm); }
+
+/* ---------- Prologue / Executive summary ---------- */
+.prologue .lede {
+  font-family: var(--f-body);
+  font-size: 1.2rem;
+  line-height: var(--lh-prose);
+  color: var(--paper);
+  max-width: 62ch;
+  font-weight: 380;
+}
+.prologue .lede .dropcap {
+  float: left;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 30, 'wght' 620;
+  font-size: 4.6em;
+  line-height: 0.82;
+  padding: 0.04em 0.12em 0 0;
+  color: var(--gold);
+  letter-spacing: -0.04em;
+}
+.prologue p + p {
+  max-width: 64ch;
+  color: var(--paper-quiet);
+  font-size: var(--fs-body);
+  font-weight: 380;
+}
+.prologue p em { font-style: italic; color: var(--paper); }
+
+/* ---------- Legend: accrual + severity keys ---------- */
+.legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  padding: 1.6rem 1.8rem;
+  background: var(--ink-surface);
+  border: 1px solid var(--ink-rule);
+  border-radius: 2px;
+}
+@media (max-width: 760px) { .legend { grid-template-columns: 1fr; } }
+.legend h3 {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--paper-muted);
+  margin-bottom: 0.9rem;
+  font-weight: 500;
+}
+.legend dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem 1rem;
+  margin: 0;
+  font-size: var(--fs-small);
+}
+.legend dt {
+  font-family: var(--f-mono);
+  color: var(--gold);
+  font-weight: 500;
+  font-size: var(--fs-mono-body);
+  line-height: 1.4;
+}
+.legend dd {
+  margin: 0;
+  color: var(--paper-quiet);
+  line-height: 1.4;
+}
+.legend dd strong { color: var(--paper); font-weight: 500; }
+
+/* ---------- Summary table — The Ledger ---------- */
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-table th {
+  text-align: left;
+  font-family: var(--f-mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-muted);
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--ink-rule-mid);
+  white-space: nowrap;
+}
+.ledger-table td {
+  padding: 0.72rem 0.9rem;
+  border-bottom: 1px solid var(--ink-rule);
+  vertical-align: baseline;
+}
+.ledger-table tr:hover td {
+  background: var(--ink-surface);
+}
+.ledger-table .col-num {
+  width: 3em;
+  color: var(--paper-dim);
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+}
+.ledger-table .col-sev { width: 6em; }
+.ledger-table .col-title a {
+  color: var(--paper);
+  border-bottom-color: transparent;
+  font-weight: 400;
+}
+.ledger-table .col-title a:hover {
+  color: var(--gold);
+  border-bottom-color: var(--gold-dim);
+}
+.ledger-table .col-loc {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  color: var(--paper-muted);
+  white-space: nowrap;
+}
+.ledger-table .col-accrual {
+  color: var(--gold-dim);
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  letter-spacing: 0.02em;
+}
+.ledger-table .col-phase {
+  width: 5em;
+  color: var(--paper-muted);
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  text-align: right;
+}
+
+/* Severity pill — restrained, not JIRA */
+.sev {
+  display: inline-block;
+  font-family: var(--f-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.22em 0.6em;
+  border-radius: 1px;
+  border: 1px solid;
+  line-height: 1.4;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.sev-crit   { color: var(--sev-crit-fg); border-color: var(--sev-crit-rule); background: var(--sev-crit-bg); }
+.sev-high   { color: var(--sev-high-fg); border-color: var(--sev-high-rule); background: var(--sev-high-bg); }
+.sev-med    { color: var(--sev-med-fg);  border-color: var(--sev-med-rule);  background: var(--sev-med-bg);  }
+.sev-low    { color: var(--sev-low-fg);  border-color: var(--sev-low-rule);  background: var(--sev-low-bg);  }
+
+/* ---------- Tier intro ---------- */
+.tier {
+  margin-bottom: var(--rhythm);
+}
+.tier-intro {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: clamp(1rem, 3vw, 2.5rem);
+  align-items: start;
+  margin-bottom: 2.2rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--ink-rule);
+}
+@media (max-width: 700px) {
+  .tier-intro { grid-template-columns: 1fr; gap: 0.5rem; }
+}
+.tier-intro .tier-label {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding-top: 0.4em;
+}
+.tier-intro[data-tier="crit"] .tier-label { color: var(--sev-crit-fg); }
+.tier-intro[data-tier="high"] .tier-label { color: var(--sev-high-fg); }
+.tier-intro[data-tier="med"]  .tier-label { color: var(--sev-med-fg);  }
+.tier-intro[data-tier="low"]  .tier-label { color: var(--sev-low-fg);  }
+.tier-intro h2 {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-variation-settings: 'opsz' 100, 'SOFT' 60, 'wght' 540;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  letter-spacing: -0.02em;
+  color: var(--paper);
+  margin-bottom: 0.4rem;
+}
+.tier-intro p {
+  color: var(--paper-quiet);
+  font-style: italic;
+  font-weight: 380;
+  max-width: 56ch;
+  margin: 0;
+}
+
+/* ---------- Finding card ---------- */
+.finding {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: clamp(1rem, 3vw, 2.5rem);
+  padding: 2.1rem 0 2.4rem;
+  border-bottom: 1px solid var(--ink-rule);
+}
+.finding:last-child { border-bottom: none; }
+@media (max-width: 700px) {
+  .finding { grid-template-columns: 1fr; gap: 1rem; }
+}
+
+/* Left folio — margin data */
+.folio {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  line-height: 1.55;
+  color: var(--paper-muted);
+  letter-spacing: 0.02em;
+}
+.folio .no {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-variation-settings: 'opsz' 144, 'SOFT' 50, 'wght' 520;
+  font-size: 2.1rem;
+  color: var(--gold);
+  display: block;
+  line-height: 1;
+  margin-bottom: 0.8rem;
+  letter-spacing: -0.01em;
+}
+.folio .sev { margin-bottom: 0.8rem; }
+.folio .folio-row {
+  display: block;
+  margin-bottom: 0.32rem;
+}
+.folio .k {
+  display: block;
+  color: var(--paper-dim);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.1rem;
+}
+.folio .v { color: var(--paper); }
+.folio .accrual-marker {
+  color: var(--gold);
+}
+
+/* Right body */
+.finding-body h3 {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-variation-settings: 'opsz' 36, 'SOFT' 50, 'wght' 560;
+  font-size: var(--fs-h3);
+  letter-spacing: -0.01em;
+  color: var(--paper);
+  margin-bottom: 1.1rem;
+  line-height: 1.22;
+}
+.finding-body .block-label {
+  display: inline-block;
+  font-family: var(--f-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 500;
+  margin: 1.3rem 0 0.35rem;
+}
+.finding-body .block-label:first-child { margin-top: 0; }
+.finding-body p {
+  font-size: var(--fs-body);
+  max-width: 68ch;
+  color: var(--paper);
+  font-weight: 380;
+}
+.finding-body p.muted { color: var(--paper-quiet); }
+
+/* Pull quote — the sharp line */
+.pull {
+  border-left: 2px solid var(--gold);
+  margin: 1.6rem 0;
+  padding: 0.15rem 0 0.15rem 1.1rem;
+  font-family: var(--f-display);
+  font-weight: 400;
+  font-variation-settings: 'opsz' 48, 'SOFT' 80, 'wght' 440;
+  font-style: italic;
+  font-size: 1.2rem;
+  line-height: 1.35;
+  color: var(--paper);
+  max-width: 48ch;
+}
+
+/* Code block — fix */
+pre {
+  margin: 0.7rem 0 0;
+  padding: 1.05rem 1.2rem;
+  background: var(--ink-abyss);
+  border: 1px solid var(--ink-rule);
+  border-left: 2px solid var(--gold-dim);
+  border-radius: 2px;
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-body);
+  line-height: 1.6;
+  overflow-x: auto;
+  color: var(--paper-quiet);
+}
+pre code {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  display: block;
+  white-space: pre;
+}
+pre .add    { color: var(--diff-add);    }
+pre .rm     { color: var(--diff-remove); text-decoration: line-through; text-decoration-color: var(--diff-remove); text-decoration-thickness: 1px; }
+pre .c      { color: var(--paper-dim); font-style: italic; }
+pre .k      { color: var(--paper); }
+pre .lit    { color: var(--gold); }
+pre .id     { color: var(--paper); font-weight: 500; }
+
+/* Inline code in prose */
+:not(pre) > code {
+  background: var(--ink-surface);
+  color: var(--paper);
+  border: 1px solid var(--ink-rule);
+  padding: 0.05em 0.35em;
+  border-radius: 2px;
+  font-size: 0.88em;
+}
+
+/* ---------- Footnote aside ---------- */
+.aside {
+  margin: 1.4rem 0 0;
+  padding: 0.95rem 1.15rem;
+  background: var(--ink-surface);
+  border-left: 1px solid var(--ink-rule-mid);
+  font-size: var(--fs-small);
+  color: var(--paper-quiet);
+  line-height: 1.55;
+}
+.aside .aside-label {
+  font-family: var(--f-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-muted);
+  font-weight: 500;
+  margin-right: 0.55rem;
+}
+
+/* ---------- Architectural context ---------- */
+.context {
+  background: var(--ink-surface);
+  border: 1px solid var(--ink-rule);
+  border-radius: 2px;
+  padding: clamp(1.5rem, 3vw, 2.2rem);
+}
+.context h2 {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 60, 'SOFT' 60, 'wght' 520;
+  font-size: 1.55rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--paper);
+  margin-bottom: 0.4rem;
+}
+.context .dek {
+  color: var(--paper-muted);
+  font-style: italic;
+  margin-bottom: 1.6rem;
+  max-width: 58ch;
+}
+.context ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ctx;
+  display: grid;
+  gap: 1.1rem;
+}
+.context li {
+  counter-increment: ctx;
+  display: grid;
+  grid-template-columns: 2.2rem 1fr;
+  gap: 0.7rem;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--paper-quiet);
+  max-width: 72ch;
+}
+.context li::before {
+  content: counter(ctx, decimal-leading-zero);
+  font-family: var(--f-mono);
+  color: var(--gold);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  padding-top: 0.15em;
+}
+.context li strong { color: var(--paper); font-weight: 500; }
+.context li code { font-size: 0.86em; }
+
+/* ---------- Settlement (phases) ---------- */
+.settlement .phase {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: clamp(1rem, 3vw, 2.5rem);
+  padding: 1.7rem 0;
+  border-bottom: 1px solid var(--ink-rule);
+  align-items: start;
+}
+.settlement .phase:last-child { border-bottom: none; }
+@media (max-width: 700px) {
+  .settlement .phase { grid-template-columns: 1fr; gap: 0.6rem; }
+}
+.settlement .phase-num {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 50, 'wght' 520;
+  font-size: 1.55rem;
+  color: var(--gold);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.settlement .phase-meta {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  color: var(--paper-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 0.5rem;
+  display: block;
+}
+.settlement .phase-title {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 48, 'SOFT' 60, 'wght' 540;
+  font-weight: 500;
+  font-size: 1.2rem;
+  color: var(--paper);
+  margin-bottom: 0.2rem;
+  letter-spacing: -0.005em;
+}
+.settlement .phase-desc {
+  color: var(--paper-quiet);
+  font-style: italic;
+  margin-bottom: 0.9rem;
+  max-width: 58ch;
+  font-weight: 380;
+}
+.settlement ul.fixes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+.settlement ul.fixes li {
+  font-size: var(--fs-small);
+  padding: 0.5rem 0.85rem;
+  background: var(--ink-surface);
+  border-left: 2px solid var(--ink-rule-mid);
+  display: grid;
+  grid-template-columns: 3.2rem 1fr auto;
+  gap: 0.8rem;
+  align-items: baseline;
+}
+.settlement ul.fixes li .no {
+  font-family: var(--f-mono);
+  color: var(--gold);
+  font-size: var(--fs-mono-small);
+}
+.settlement ul.fixes li a {
+  color: var(--paper);
+  border-bottom: none;
+}
+.settlement ul.fixes li a:hover { color: var(--gold); }
+.settlement ul.fixes li .loc {
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  color: var(--paper-muted);
+}
+
+/* ---------- Colophon ---------- */
+.colophon {
+  margin-top: calc(var(--rhythm) * 1.2);
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--ink-rule-mid);
+  font-family: var(--f-mono);
+  font-size: var(--fs-mono-small);
+  color: var(--paper-dim);
+  letter-spacing: 0.05em;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+}
+.colophon em {
+  font-style: italic;
+  font-family: var(--f-body);
+  color: var(--paper-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.colophon .end-mark {
+  font-family: var(--f-display);
+  color: var(--gold);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* ---------- Responsive table: scroll on narrow ---------- */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--ink-rule);
+  border-radius: 2px;
+  background: var(--ink-surface);
+}
+.ledger-table { min-width: 860px; }
+
+/* ---------- Small screens, main grid collapses ---------- */
+@media (max-width: 700px) {
+  .folio .no { font-size: 1.6rem; margin-bottom: 0.4rem; }
+  .section-head { grid-template-columns: auto 1fr; }
+  .section-head .right-note { grid-column: 1 / -1; }
+  .cover .coverline { gap: 1rem; }
+}
+
+/* ---------- Print — keep it readable if the user prints to PDF ---------- */
+@media print {
+  :root {
+    --ink-abyss: #fff; --ink-bg: #fff; --ink-surface: #faf7f0; --ink-card: #fff;
+    --ink-rule: #d9d2c3; --ink-rule-mid: #a89d86;
+    --paper: #1a1613; --paper-quiet: #403a32; --paper-muted: #6b6252;
+    --paper-dim: #8c8372; --paper-whisper: #aea79a;
+    --gold: #8c6b27;
+  }
+  body { background: #fff; color: #1a1613; }
+  a { color: #8c6b27; border-bottom-color: #cfbf97; }
+  .finding, .phase { break-inside: avoid; }
+  pre { background: #f4efe3; color: #1a1613; }
+}
+
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- ========================================================
+         MASTHEAD — light-touch publication identity
+         ======================================================== -->
+    <header class="masthead" role="banner">
+      <div class="mast-left">
+        <span>CB Manager</span>
+        <span>Performance Audit</span>
+        <span>№ 01</span>
+      </div>
+      <div class="mast-right">
+        <span class="folio-num">2026 · 04 · 19</span>
+      </div>
+    </header>
+
+    <!-- ========================================================
+         COVER — the one-line argument
+         ======================================================== -->
+    <section class="cover" aria-label="Cover">
+      <div class="kicker">Fourteen hidden taxes on an app that promises instant</div>
+      <h1>The Cost<br>of a <em>Paste</em>.</h1>
+      <p class="dek">A ledger of accrued performance costs in a macOS clipboard manager — ordered by what they take, and how often they take it.</p>
+      <div class="coverline">
+        <span><strong>14</strong> findings</span>
+        <span><strong>4</strong> tiers</span>
+        <span><strong>2</strong> critical</span>
+        <span><strong>~6h</strong> total fix</span>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         PROLOGUE — editor's note, with drop cap
+         ======================================================== -->
+    <section class="prologue prose" aria-labelledby="prologue-h">
+      <h2 id="prologue-h" class="visually-hidden" hidden>Prologue</h2>
+      <p class="lede"><span class="dropcap">E</span>very clipboard paste is a small contract with the user: I will remember this, and I will not make you wait. CB Manager honours that contract. Recent commits stamped out the two worst freezes — the every-other-open stall and the search-scroll seize — and the app now opens cleanly, pastes cleanly, scrolls cleanly.</p>
+      <p>What's left is the slow accounting. A clipboard manager is a long-running process: it accrues cost not in single dramatic hangs but in microseconds-per-keystroke, kilobytes-per-screenshot, fsyncs-per-capture. Multiplied by a workday. Multiplied by a month of uptime.</p>
+      <p>This audit inventories the remaining line items. Two of them — an untuned SQLite and an unbounded duplicate-signature cache — are <em>critical</em> because they get worse the longer the app runs. Four are <em>high</em> because they bite during ordinary use. Eight more are smaller: hygiene, compounding wastes, trivial wins. None of this is a regression. It's the next layer of polish on an app that already works.</p>
+    </section>
+
+    <!-- ========================================================
+         LEGEND — how to read it
+         ======================================================== -->
+    <section class="legend" aria-labelledby="legend-h">
+      <div>
+        <h3 id="legend-h">Accrual · when you pay the cost</h3>
+        <dl>
+          <dt>◉</dt> <dd><strong>Startup</strong> — paid once, at cold launch or bootstrap</dd>
+          <dt>▸</dt> <dd><strong>Per-event</strong> — every paste, every clipboard capture</dd>
+          <dt>▪▪▪</dt> <dd><strong>Per-interaction</strong> — every keystroke, every scroll tick</dd>
+          <dt>∞</dt> <dd><strong>Accumulates</strong> — memory or index grows without bound</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Severity · what breaks if you ignore it</h3>
+        <dl>
+          <dt><span class="sev sev-crit">Critical</span></dt> <dd>Worsens with uptime. Fix first.</dd>
+          <dt><span class="sev sev-high">High</span></dt> <dd>Bites during ordinary use, at scale.</dd>
+          <dt><span class="sev sev-med">Medium</span></dt> <dd>Small but compounding, common path.</dd>
+          <dt><span class="sev sev-low">Low</span></dt> <dd>Hygiene, maintainability, microseconds.</dd>
+        </dl>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         LEDGER — at-a-glance summary of all 14
+         ======================================================== -->
+    <section aria-labelledby="ledger-h">
+      <div class="section-head">
+        <span class="marker">I · The ledger</span>
+        <h2 id="ledger-h">Fourteen line items</h2>
+        <span class="right-note">ordered by tier</span>
+      </div>
+      <div class="table-wrap">
+        <table class="ledger-table" aria-label="All findings at a glance">
+          <thead>
+            <tr>
+              <th class="col-num">§</th>
+              <th class="col-sev">Tier</th>
+              <th class="col-title">Finding</th>
+              <th class="col-loc">Location</th>
+              <th class="col-accrual">Accrual</th>
+              <th class="col-phase">Phase</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="col-num">01</td>
+              <td><span class="sev sev-crit">Critical</span></td>
+              <td class="col-title"><a href="#f01">SQLite opens with default pragmas</a></td>
+              <td class="col-loc">ClipboardDatabase.swift:186</td>
+              <td class="col-accrual">▸ · ∞</td>
+              <td class="col-phase">1</td>
+            </tr>
+            <tr>
+              <td class="col-num">02</td>
+              <td><span class="sev sev-crit">Critical</span></td>
+              <td class="col-title"><a href="#f02">Image signature dict is unbounded</a></td>
+              <td class="col-loc">ClipboardStore.swift:241</td>
+              <td class="col-accrual">∞</td>
+              <td class="col-phase">1</td>
+            </tr>
+            <tr>
+              <td class="col-num">03</td>
+              <td><span class="sev sev-high">High</span></td>
+              <td class="col-title"><a href="#f03">selectedEntry does O(n) scan per render</a></td>
+              <td class="col-loc">SearchOverlayView.swift:48</td>
+              <td class="col-accrual">▪▪▪</td>
+              <td class="col-phase">2</td>
+            </tr>
+            <tr>
+              <td class="col-num">04</td>
+              <td><span class="sev sev-high">High</span></td>
+              <td class="col-title"><a href="#f04">Missing indexes on kind and source_app</a></td>
+              <td class="col-loc">ClipboardDatabase.swift:193</td>
+              <td class="col-accrual">◉ · ▸</td>
+              <td class="col-phase">3</td>
+            </tr>
+            <tr>
+              <td class="col-num">05</td>
+              <td><span class="sev sev-high">High</span></td>
+              <td class="col-title"><a href="#f05">QMD rewrites entire markdown per upsert</a></td>
+              <td class="col-loc">QMDSearchEngine.swift</td>
+              <td class="col-accrual">◉ · ▸</td>
+              <td class="col-phase">3</td>
+            </tr>
+            <tr>
+              <td class="col-num">06</td>
+              <td><span class="sev sev-high">High</span></td>
+              <td class="col-title"><a href="#f06">Single NSLock serializes thumbnail cache</a></td>
+              <td class="col-loc">ThumbnailCache.swift:14</td>
+              <td class="col-accrual">▪▪▪</td>
+              <td class="col-phase">2</td>
+            </tr>
+            <tr>
+              <td class="col-num">07</td>
+              <td><span class="sev sev-med">Medium</span></td>
+              <td class="col-title"><a href="#f07">classify() URL-parses every text capture</a></td>
+              <td class="col-loc">ClipboardStore.swift:1022</td>
+              <td class="col-accrual">▸</td>
+              <td class="col-phase">3</td>
+            </tr>
+            <tr>
+              <td class="col-num">08</td>
+              <td><span class="sev sev-med">Medium</span></td>
+              <td class="col-title"><a href="#f08">loadEntries not wrapped in transaction</a></td>
+              <td class="col-loc">ClipboardDatabase.swift:25</td>
+              <td class="col-accrual">◉</td>
+              <td class="col-phase">4</td>
+            </tr>
+            <tr>
+              <td class="col-num">09</td>
+              <td><span class="sev sev-med">Medium</span></td>
+              <td class="col-title"><a href="#f09">Grouped entries rebuilt on every filter tick</a></td>
+              <td class="col-loc">SearchOverlayView.swift:423</td>
+              <td class="col-accrual">▪▪▪</td>
+              <td class="col-phase">3</td>
+            </tr>
+            <tr>
+              <td class="col-num">10</td>
+              <td><span class="sev sev-med">Medium</span></td>
+              <td class="col-title"><a href="#f10">persistImage encodes PNG on poll thread</a></td>
+              <td class="col-loc">ClipboardStore.swift:1006</td>
+              <td class="col-accrual">▸</td>
+              <td class="col-phase">2</td>
+            </tr>
+            <tr>
+              <td class="col-num">11</td>
+              <td><span class="sev sev-low">Low</span></td>
+              <td class="col-title"><a href="#f11">fuzzyScore re-tokenizes via string overload</a></td>
+              <td class="col-loc">ClipboardSearch.swift</td>
+              <td class="col-accrual">▪▪▪</td>
+              <td class="col-phase">4</td>
+            </tr>
+            <tr>
+              <td class="col-num">12</td>
+              <td><span class="sev sev-low">Low</span></td>
+              <td class="col-title"><a href="#f12">Duplicate shell-PATH resolution</a></td>
+              <td class="col-loc">QMD + ImageTitleGenerator</td>
+              <td class="col-accrual">◉</td>
+              <td class="col-phase">4</td>
+            </tr>
+            <tr>
+              <td class="col-num">13</td>
+              <td><span class="sev sev-low">Low</span></td>
+              <td class="col-title"><a href="#f13">inlineMetadataStats recomputed on every preview</a></td>
+              <td class="col-loc">SearchOverlayView.swift:759</td>
+              <td class="col-accrual">▪▪▪</td>
+              <td class="col-phase">4</td>
+            </tr>
+            <tr>
+              <td class="col-num">14</td>
+              <td><span class="sev sev-low">Low</span></td>
+              <td class="col-title"><a href="#f14">buildSearchableText intermediate allocations</a></td>
+              <td class="col-loc">ClipboardStore.swift:146</td>
+              <td class="col-accrual">◉ · ▸</td>
+              <td class="col-phase">4</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         CRITICAL TIER
+         ======================================================== -->
+    <section class="tier" aria-labelledby="tier-crit-h">
+      <div class="section-head">
+        <span class="marker">II · Tier one</span>
+        <h2 id="tier-crit-h">Critical</h2>
+        <span class="right-note">2 findings · phase 1</span>
+      </div>
+
+      <div class="tier-intro" data-tier="crit">
+        <span class="tier-label">Critical</span>
+        <div>
+          <h2>Costs that do not level off.</h2>
+          <p>These two findings are the only ones whose damage <em>increases</em> with uptime. A clipboard manager lives at the login item, often for weeks between restarts. Anything that grows linearly in weeks-of-use earns the top tier automatically.</p>
+        </div>
+      </div>
+
+      <!-- §01 -->
+      <article class="finding" id="f01">
+        <div class="folio">
+          <span class="no">§01</span>
+          <span class="sev sev-crit">Critical</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardDatabase.swift<br>L. 186–191</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▸ per-event<br>∞ background</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">1 · biggest win</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>No WAL, no tuning — every write pays rent.</h3>
+
+          <span class="block-label">What</span>
+          <p>The database opens with SQLite's factory settings: <code>journal_mode = DELETE</code>, <code>synchronous = FULL</code>, no busy timeout, no <code>temp_store</code> override. These are correct, but they are not choices. They are what you get when you don't pick.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Every <code>INSERT</code> or <code>UPDATE</code> triggers a full fsync. A clipboard capture — which should feel instant — blocks waiting for the disk. Under DELETE journaling there is also no reader/writer concurrency, so background work (OCR results writing back, AI titles resolving, QMD upserts) contends with the pasteboard poll. On pressured storage this is the single largest contributor to write-path latency in the app, and it is invisible to the user except as occasional stickiness.</p>
+
+          <div class="pull">Default SQLite pragmas optimize for survival at rest. WAL optimizes for latency in flight — and costs you nothing.</div>
+
+          <span class="block-label">Fix</span>
+          <p>In <code>openDatabase()</code>, immediately after <code>sqlite3_open</code>:</p>
+<pre><code><span class="c">// Safe for a single-writer, multi-reader app DB</span>
+<span class="id">sqlite3_exec</span>(db, <span class="lit">"PRAGMA journal_mode = WAL;"</span>,     nil, nil, nil);
+<span class="id">sqlite3_exec</span>(db, <span class="lit">"PRAGMA synchronous  = NORMAL;"</span>,  nil, nil, nil);
+<span class="id">sqlite3_exec</span>(db, <span class="lit">"PRAGMA busy_timeout = 5000;"</span>,    nil, nil, nil);
+<span class="id">sqlite3_exec</span>(db, <span class="lit">"PRAGMA temp_store   = MEMORY;"</span>,   nil, nil, nil);</code></pre>
+          <p class="muted">WAL also makes reads non-blocking during writes, which directly relieves the contention in <a href="#f05">§05</a> and partially subsumes <a href="#f08">§08</a>.</p>
+        </div>
+      </article>
+
+      <!-- §02 -->
+      <article class="finding" id="f02">
+        <div class="folio">
+          <span class="no">§02</span>
+          <span class="sev sev-crit">Critical</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardStore.swift<br>L. 241, 773–783</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">∞ accumulates</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">1 · biggest win</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>The duplicate-signature dictionary has no exit.</h3>
+
+          <span class="block-label">What</span>
+          <p><code>imageDuplicateSignatures: [String: ImageDuplicateSignature]</code> is keyed by image path and populated every time the duplicate check runs. It is only emptied when an entry is explicitly deleted, or when the undo-stack's pending-deletion sweep finds it. Each signature carries head- and tail-byte samples — kilobytes per image, by design.</p>
+
+          <span class="block-label">Impact</span>
+          <p>For a user who traffics in screenshots — designers, QA, anyone in review — the dictionary grows continuously and never shrinks for the lifetime of the process. A month-long session accrues tens of megabytes of ghost state: signatures for images the user long since forgot about, kept alive solely by this cache. The app's memory footprint looks fine at launch and bloats over uptime. Classic slow leak.</p>
+
+          <div class="pull">A dictionary is a map, not a cache. It has no notion of "old" and no reason to let go.</div>
+
+          <span class="block-label">Fix</span>
+          <p>Replace with an <code>NSCache</code>. Set a count limit, a total cost limit, and pass the signature byte-count as the cost on insert. The OS handles LRU eviction automatically under memory pressure.</p>
+<pre><code><span class="c">// ImageDuplicateSignature is a struct; wrap for NSCache.</span>
+<span class="k">final class</span> <span class="id">ImageDuplicateSignatureBox</span>: <span class="id">NSObject</span> {
+    <span class="k">let</span> value: <span class="id">ImageDuplicateSignature</span>
+    <span class="k">init</span>(_ v: <span class="id">ImageDuplicateSignature</span>) { <span class="k">self</span>.value = v }
+}
+
+<span class="k">private let</span> imageDuplicateSignatures: <span class="id">NSCache</span>&lt;<span class="id">NSString</span>, <span class="id">ImageDuplicateSignatureBox</span>&gt; = {
+    <span class="k">let</span> c = <span class="id">NSCache</span>&lt;<span class="id">NSString</span>, <span class="id">ImageDuplicateSignatureBox</span>&gt;()
+    c.countLimit     = <span class="lit">256</span>
+    c.totalCostLimit = <span class="lit">32</span> * <span class="lit">1024</span> * <span class="lit">1024</span>   <span class="c">// 32 MB</span>
+    <span class="k">return</span> c
+}()</code></pre>
+          <p class="muted">Update the insert site to pass a cost roughly equal to <code>head.count + tail.count</code>. Cache misses now re-read the sample bytes from disk — which is cheap for 32 KB of file I/O, and exactly what NSCache is designed for.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========================================================
+         HIGH TIER
+         ======================================================== -->
+    <section class="tier" aria-labelledby="tier-high-h">
+      <div class="section-head">
+        <span class="marker">III · Tier two</span>
+        <h2 id="tier-high-h">High</h2>
+        <span class="right-note">4 findings · phase 2 &amp; 3</span>
+      </div>
+
+      <div class="tier-intro" data-tier="high">
+        <span class="tier-label">High</span>
+        <div>
+          <h2>Felt during ordinary use, at ordinary scale.</h2>
+          <p>These don't grow unbounded, but they make themselves known. A stutter during arrow-key navigation, a hitch when many images scroll past, a slow bootstrap after a long history import — all reliably reproducible on a typical user's week-old history.</p>
+        </div>
+      </div>
+
+      <!-- §03 -->
+      <article class="finding" id="f03">
+        <div class="folio">
+          <span class="no">§03</span>
+          <span class="sev sev-high">High</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">SearchOverlayView.swift<br>L. 48–52</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▪▪▪ per keystroke</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">2</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>Linear scan of the filtered list, once per body evaluation.</h3>
+
+          <span class="block-label">What</span>
+          <p>The <code>selectedEntry</code> computed property resolves the currently selected ID by calling <code>entries.first { $0.id == selectedID }</code>. SwiftUI re-evaluates the body on any <code>@Published</code> change — every keystroke, every filter tick, every selection move — and each evaluation runs a fresh O(<em>n</em>) scan.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Invisible at a hundred entries. Visible at a thousand. The preview pane reads <code>selectedEntry</code> too, so each body evaluation pays the cost twice. Arrow-key nav on a large history becomes stuttery in a way that's maddening because the app <em>looks</em> responsive — the text is ready, the pane just lags the caret.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Maintain an index dictionary alongside <code>filteredEntries</code>, rebuilt inside <code>recomputeFilteredEntries()</code>. Lookup becomes O(1).</p>
+<pre><code><span class="c">// in ClipboardStore</span>
+<span class="k">@Published private(set) var</span> filteredEntries: [<span class="id">ClipboardEntry</span>] = []
+<span class="k">private var</span> filteredIndexByID: [<span class="id">ClipboardEntry</span>.<span class="id">ID</span>: <span class="id">Int</span>] = [:]
+
+<span class="k">private func</span> recomputeFilteredEntries() {
+    <span class="c">// ... existing work ...</span>
+    filteredIndexByID = <span class="id">Dictionary</span>(
+        uniqueKeysWithValues: filteredEntries.enumerated().map { ($1.id, $0) }
+    )
+}
+
+<span class="k">func</span> entry(for id: <span class="id">ClipboardEntry</span>.<span class="id">ID</span>) -&gt; <span class="id">ClipboardEntry</span>? {
+    filteredIndexByID[id].map { filteredEntries[$0] }
+}</code></pre>
+          <p class="muted">Call <code>store.entry(for: selectedID)</code> from the view. Keep <code>filteredEntries.first</code> as the fallback for "no selection yet." The index is discarded and rebuilt wholesale — no partial-update gymnastics required.</p>
+        </div>
+      </article>
+
+      <!-- §04 -->
+      <article class="finding" id="f04">
+        <div class="folio">
+          <span class="no">§04</span>
+          <span class="sev sev-high">High</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardDatabase.swift<br>L. 193–213</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">◉ startup<br>▸ future paths</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">3</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>One index exists. The schema has three filterable columns.</h3>
+
+          <span class="block-label">What</span>
+          <p>Only <code>idx_clipboard_entries_created_at</code> is declared. The app filters by <code>kind</code> (the pill selector in the overlay) and — by design intention — by <code>source_app</code>. Current kind filtering is done in memory after <code>loadEntries()</code> pulls the whole table, so the absence is invisible today. Any future work that wants to filter server-side, paginate, or delete-by-kind will hit a full table scan.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Not felt in the current code path. Felt immediately the first time someone writes <code>DELETE FROM clipboard_entries WHERE kind = 'image'</code> or migrates to paginated loading. This finding is ranked High because the indexes cost almost nothing to add and unblock a class of future changes that are otherwise embarrassing to get wrong under load.</p>
+
+          <span class="block-label">Fix</span>
+<pre><code><span class="id">CREATE</span> <span class="id">INDEX</span> <span class="id">IF</span> <span class="id">NOT</span> <span class="id">EXISTS</span> idx_clipboard_entries_kind
+    <span class="id">ON</span> clipboard_entries(kind);
+
+<span class="id">CREATE</span> <span class="id">INDEX</span> <span class="id">IF</span> <span class="id">NOT</span> <span class="id">EXISTS</span> idx_clipboard_entries_source_app
+    <span class="id">ON</span> clipboard_entries(source_app);</code></pre>
+          <p class="muted">Add to <code>createSchema()</code>. SQLite will build both in one pass. For a 5,000-row table the one-time cost is in milliseconds, after which every subsequent filter path is O(log <em>n</em>) instead of O(<em>n</em>).</p>
+        </div>
+      </article>
+
+      <!-- §05 -->
+      <article class="finding" id="f05">
+        <div class="folio">
+          <span class="no">§05</span>
+          <span class="sev sev-high">High</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">QMDSearchEngine.swift<br>writeDocument()</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">◉ bootstrap<br>▸ every upsert</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">3</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>Every upsert serializes and overwrites the full markdown.</h3>
+
+          <span class="block-label">What</span>
+          <p><code>writeDocument()</code> re-renders the entry's complete markdown representation on every upsert, then writes it to disk. An entry is upserted at least three times in normal operation: once on capture, again when OCR resolves, and again when the AI title lands. On bootstrap it's called once per entry in the existing history, back to back.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Slow first-index after a fresh install or after importing a history dump — the user sees an app that "feels unresponsive for a while" on launch. During normal use there's a constant trickle of markdown writes as OCR and AI titles resolve asynchronously. None of it is individually slow; all of it is individually unnecessary.</p>
+
+          <div class="pull">If three systems each rewrite the same document in the same second, the disk doesn't care who's right — it just writes three times.</div>
+
+          <span class="block-label">Fix</span>
+          <p>Coalesce per-entry writes with a short debounce, and avoid the full re-serialization when only one field changed.</p>
+<pre><code><span class="k">private var</span> writeTasks: [<span class="id">String</span>: <span class="id">Task</span>&lt;<span class="id">Void</span>, <span class="id">Never</span>&gt;] = [:]
+
+<span class="k">func</span> upsert(_ entry: <span class="id">ClipboardEntry</span>) <span class="k">async</span> {
+    <span class="k">await</span> ensureCollection()
+    writeTasks[entry.id]?.cancel()
+    writeTasks[entry.id] = <span class="id">Task</span> {
+        <span class="k">try</span>? <span class="k">await</span> <span class="id">Task</span>.sleep(<span class="k">for</span>: .milliseconds(<span class="lit">200</span>))
+        <span class="k">guard</span> !<span class="id">Task</span>.isCancelled <span class="k">else</span> { <span class="k">return</span> }
+        writeDocument(<span class="k">for</span>: entry)
+        scheduleUpdate()
+    }
+}</code></pre>
+          <p class="muted">For bootstrap, dispatch the N writes on a detached utility task with bounded concurrency (a semaphore of 4–8 is plenty). Longer term: consider whether N markdown files is even the right shape — a single JSONL index could replace them all with one append per upsert.</p>
+        </div>
+      </article>
+
+      <!-- §06 -->
+      <article class="finding" id="f06">
+        <div class="folio">
+          <span class="no">§06</span>
+          <span class="sev sev-high">High</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ThumbnailCache.swift<br>L. 14–22</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▪▪▪ per scroll tick</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">2</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>One NSLock, two responsibilities, four contenders.</h3>
+
+          <span class="block-label">What</span>
+          <p>A single <code>NSLock</code> guards both the <code>NSCache</code> read/write path and the in-flight load tracking dictionaries. <code>NSCache</code> is already thread-safe internally — the extra lock is double-guarding the hot path.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Fast scrolling through a window dense with image entries wakes multiple threads: SwiftUI's rendering threads, thumbnail decoders, the main thread requesting cached previews. They all pay a trip through the same lock. Contention shows up as micro-stalls during scroll — the kind of thing you can't quite screenshot but you can feel.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Split the responsibilities. Let <code>NSCache</code> handle its own reads and writes directly (no lock). Use <code>os_unfair_lock</code> — cheaper than NSLock — for the in-flight dictionaries only.</p>
+<pre><code><span class="k">private var</span> inFlightLock = os_unfair_lock_s()
+<span class="k">private var</span> inFlightLoads: [<span class="id">NSString</span>: <span class="id">DispatchGroup</span>] = [:]
+
+<span class="k">private func</span> withInFlight&lt;T&gt;(_ body: () -&gt; T) -&gt; T {
+    os_unfair_lock_lock(&amp;inFlightLock)
+    <span class="k">defer</span> { os_unfair_lock_unlock(&amp;inFlightLock) }
+    <span class="k">return</span> body()
+}
+
+<span class="c">// cache reads/writes: no lock needed, NSCache is thread-safe.</span>
+<span class="c">// only dict access goes through withInFlight { … }</span></code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========================================================
+         MEDIUM TIER
+         ======================================================== -->
+    <section class="tier" aria-labelledby="tier-med-h">
+      <div class="section-head">
+        <span class="marker">IV · Tier three</span>
+        <h2 id="tier-med-h">Medium</h2>
+        <span class="right-note">4 findings</span>
+      </div>
+
+      <div class="tier-intro" data-tier="med">
+        <span class="tier-label">Medium</span>
+        <div>
+          <h2>Small cuts on the common path.</h2>
+          <p>Each is individually trivial; collectively they shave measurable latency off the hottest loops. Order the checks from cheap to expensive, batch the obvious, move the blocking work off the poll thread.</p>
+        </div>
+      </div>
+
+      <!-- §07 -->
+      <article class="finding" id="f07">
+        <div class="folio">
+          <span class="no">§07</span>
+          <span class="sev sev-med">Medium</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardStore.swift<br>L. 1022+</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▸ per-event</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">3</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>classify() calls URL() on strings that are obviously not URLs.</h3>
+
+          <span class="block-label">What</span>
+          <p>Every text capture runs <code>URL(string: trimmed)</code> as part of classification, even for plain prose or code. <code>URL</code>'s initializer is not free — it validates scheme, host, percent-encoding, the whole RFC 3986 tree — and it does this work even when the string has no chance of being a URL.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Per-paste overhead, small but unavoidable. For a user who copies code snippets and prose all day, it's a steady drip against a path that should be the cheapest thing in the app.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Guard the <code>URL()</code> call behind a cheap prefix check. Order the whole classifier from cheapest to most expensive probe — file paths and code-hints first (simple <code>hasPrefix</code> / <code>contains</code>), URL parsing last and only when the input plausibly could be one.</p>
+<pre><code><span class="k">private func</span> classify(_ text: <span class="id">String</span>) -&gt; <span class="id">ClipboardEntry</span>.<span class="id">Kind</span> {
+    <span class="k">let</span> trimmed = text.trimmingCharacters(<span class="k">in</span>: .whitespacesAndNewlines)
+
+    <span class="c">// Cheap checks first…</span>
+    <span class="k">if</span> trimmed.hasPrefix(<span class="lit">"/"</span>) || trimmed.hasPrefix(<span class="lit">"~/"</span>) { <span class="k">return</span> .path }
+    <span class="k">if</span> looksLikeCode(trimmed) { <span class="k">return</span> .code }
+
+    <span class="c">// URL parsing only if it could conceivably succeed.</span>
+    <span class="k">let</span> lower = trimmed.lowercased()
+    <span class="k">if</span> lower.hasPrefix(<span class="lit">"http://"</span>) || lower.hasPrefix(<span class="lit">"https://"</span>) {
+        <span class="k">if let</span> url = <span class="id">URL</span>(string: trimmed),
+           <span class="k">let</span> scheme = url.scheme?.lowercased(),
+           [<span class="lit">"http"</span>, <span class="lit">"https"</span>].contains(scheme) {
+            <span class="k">return</span> .link
+        }
+    }
+    <span class="k">return</span> .text
+}</code></pre>
+        </div>
+      </article>
+
+      <!-- §08 -->
+      <article class="finding" id="f08">
+        <div class="folio">
+          <span class="no">§08</span>
+          <span class="sev sev-med">Medium</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardDatabase.swift<br>L. 25–69</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">◉ startup</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">4</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>loadEntries runs outside a transaction.</h3>
+
+          <span class="block-label">What</span>
+          <p><code>loadEntries()</code> issues a single <code>SELECT</code>, so it's auto-committed. Without an explicit <code>BEGIN DEFERRED</code>, SQLite still takes a shared read lock and releases it around the statement — minor overhead per call.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Startup contribution only, small. Worth mentioning because it's trivial to fix, but mostly because enabling WAL in <a href="#f01">§01</a> will absorb most of the benefit automatically — concurrent reads don't wait on anything once WAL is on.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Either wrap in <code>BEGIN DEFERRED; COMMIT;</code>, or consider this fix-by-dependency: land <a href="#f01">§01</a> and reassess whether this one still shows up in traces.</p>
+        </div>
+      </article>
+
+      <!-- §09 -->
+      <article class="finding" id="f09">
+        <div class="folio">
+          <span class="no">§09</span>
+          <span class="sev sev-med">Medium</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">SearchOverlayView.swift<br>L. 423–469</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▪▪▪ per keystroke</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">3</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>Full regrouping on every filter version bump.</h3>
+
+          <span class="block-label">What</span>
+          <p><code>scheduleVisibleEntriesRebuild</code> rebuilds <code>groupedEntries</code> and <code>flattenedEntryIDs</code> on any <code>filteredEntriesVersion</code> change, even when the visible-window limit and top-N identities are unchanged.</p>
+
+          <span class="block-label">Impact</span>
+          <p>Visible as a brief lag while typing a refining search query — narrowing 500 results to 100 still rebuilds everything. Not a freeze, just a hitch. The recent <em>eliminate-search-freezes</em> commit got this below the pain threshold; the remaining work is pushing it below the perception threshold.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Short-circuit the rebuild when the computed effective limit equals the previous <code>visibleEntryLimit</code> <em>and</em> the entry identities at positions <code>0..&lt;limit</code> haven't changed. An alternative (more work, better result): maintain grouping incrementally as entries enter and leave the window.</p>
+        </div>
+      </article>
+
+      <!-- §10 -->
+      <article class="finding" id="f10">
+        <div class="folio">
+          <span class="no">§10</span>
+          <span class="sev sev-med">Medium</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardStore.swift<br>L. 1006–1020</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▸ per image paste</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">2</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>persistImage encodes and writes PNG inline on the poll thread.</h3>
+
+          <span class="block-label">What</span>
+          <p>On an image capture, <code>persistImage()</code> runs NSImage → TIFF → NSBitmapImageRep → PNG encode → disk write, all synchronously on the pasteboard poll thread inside <code>pollPasteboard()</code>.</p>
+
+          <span class="block-label">Impact</span>
+          <p>One image, no problem. A burst — dragging out a sequence of screenshots, copying frames from a contact-sheet — serializes on the encode loop. Each paste blocks the next poll tick, which delays the next capture, which compounds the queue.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Move encode + write to a detached utility task. The entry can be inserted immediately with the pending image path; the file appears shortly after. If the overlay opens in the brief window where the file doesn't exist yet, the thumbnail loader already handles missing files gracefully.</p>
+<pre><code><span class="k">private func</span> persistImage(_ image: <span class="id">NSImage</span>, id: <span class="id">String</span>) -&gt; <span class="id">String</span>? {
+    <span class="k">let</span> destination = imageDirectory
+        .appendingPathComponent(<span class="lit">"\(id).png"</span>)
+
+    <span class="id">Task</span>.detached(priority: .utility) {
+        <span class="k">guard let</span> tiff = image.tiffRepresentation,
+              <span class="k">let</span> bitmap = <span class="id">NSBitmapImageRep</span>(data: tiff),
+              <span class="k">let</span> png = bitmap.representation(using: .png, properties: [:])
+        <span class="k">else</span> { <span class="k">return</span> }
+        <span class="k">try</span>? png.write(to: destination)
+    }
+    <span class="k">return</span> destination.path
+}</code></pre>
+          <p class="muted">For bulk-paste workflows, consider a serial background queue with bounded depth so that a hundred rapid captures don't fan out a hundred concurrent encodes.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========================================================
+         LOW TIER
+         ======================================================== -->
+    <section class="tier" aria-labelledby="tier-low-h">
+      <div class="section-head">
+        <span class="marker">V · Tier four</span>
+        <h2 id="tier-low-h">Low</h2>
+        <span class="right-note">4 findings · phase 4</span>
+      </div>
+
+      <div class="tier-intro" data-tier="low">
+        <span class="tier-label">Low</span>
+        <div>
+          <h2>Hygiene. Microseconds. Leave-them-better-than-you-found-them.</h2>
+          <p>Nothing on this tier will ever appear in a bug report. It's here because these are the edits you make while you're in the file for a real reason — and because doc hygiene catches a code smell before it grows.</p>
+        </div>
+      </div>
+
+      <!-- §11 -->
+      <article class="finding" id="f11">
+        <div class="folio">
+          <span class="no">§11</span>
+          <span class="sev sev-low">Low</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardSearch.swift</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▪▪▪ per keystroke</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">4</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>Convenience overload re-tokenizes the query.</h3>
+
+          <span class="block-label">What</span>
+          <p>Public <code>fuzzyScore(entry:, query:)</code> re-splits the query string internally; the pre-tokenized overload exists but some callers take the string path. The cost is microseconds, but it's zero-reason microseconds.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Tokenize once at the top of <code>rank()</code> and call the token-array overload everywhere. Consider marking the string overload <code>@available(*, deprecated)</code> to steer callers.</p>
+        </div>
+      </article>
+
+      <!-- §12 -->
+      <article class="finding" id="f12">
+        <div class="folio">
+          <span class="no">§12</span>
+          <span class="sev sev-low">Low</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">QMDSearchEngine.swift<br>ImageTitleGenerator.swift</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">◉ first launch</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">4</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>Two actors, two login shells, one PATH.</h3>
+
+          <span class="block-label">What</span>
+          <p>Both actors independently spawn a login shell to resolve <code>$PATH</code> and locate their respective binaries. The code is near-duplicated; the <code>-ilc</code> vs <code>-lc</code> difference is intentional (QMD needs interactive PATH init for nvm/fnm resolution).</p>
+
+          <span class="block-label">Fix</span>
+          <p>Extract a shared <code>PATHResolver</code> utility with memoized results per shell-mode, so the shell spawn runs once per process, not twice.</p>
+<pre><code><span class="k">enum</span> <span class="id">PATHResolver</span> {
+    <span class="k">static func</span> resolved(interactive: <span class="id">Bool</span> = <span class="k">false</span>) <span class="k">async</span> -&gt; <span class="id">String</span> { <span class="c">/*…*/</span> }
+    <span class="k">static func</span> findBinary(_ name: <span class="id">String</span>, in path: <span class="id">String</span>) -&gt; <span class="id">String</span>? { <span class="c">/*…*/</span> }
+}</code></pre>
+        </div>
+      </article>
+
+      <!-- §13 -->
+      <article class="finding" id="f13">
+        <div class="folio">
+          <span class="no">§13</span>
+          <span class="sev sev-low">Low</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">SearchOverlayView.swift<br>L. 759–768</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">▪▪▪ per selection</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">4</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>inlineMetadataStats recomputes counts on every preview update.</h3>
+
+          <span class="block-label">What</span>
+          <p>Character count and whitespace-split word count are computed every time the selection changes, on the previewed entry's content prefix. Trivial for short entries; not quite trivial when the selection rapidly oscillates across long entries near the metadata scan limit.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Cache <code>characterCount</code> and <code>wordCount</code> inside <code>SelectedEntryDetails</code>. A return-visit to a previously-previewed entry becomes free.</p>
+        </div>
+      </article>
+
+      <!-- §14 -->
+      <article class="finding" id="f14">
+        <div class="folio">
+          <span class="no">§14</span>
+          <span class="sev sev-low">Low</span>
+          <span class="folio-row"><span class="k">Location</span><span class="v">ClipboardStore.swift<br>L. 146–158</span></span>
+          <span class="folio-row"><span class="k">Accrual</span><span class="v accrual-marker">◉ on init<br>▸ on refresh</span></span>
+          <span class="folio-row"><span class="k">Phase</span><span class="v">4</span></span>
+        </div>
+        <div class="finding-body">
+          <h3>buildSearchableText allocates an array to join six strings.</h3>
+
+          <span class="block-label">What</span>
+          <p>An intermediate array → <code>.joined(separator:)</code> → <code>.lowercased()</code> chain per entry init. Allocation overhead is small; allocation count is larger than it needs to be.</p>
+
+          <span class="block-label">Fix</span>
+          <p>Only worth changing if profiling says so. A mutable <code>String</code> with <code>append</code> interpolation would halve the allocations. This finding exists mainly to flag that the code as written costs more than its readability gain demands — revisit when you're next in the file.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========================================================
+         ARCHITECTURAL CONTEXT — what this audit is NOT
+         ======================================================== -->
+    <section class="context" aria-labelledby="context-h">
+      <h2 id="context-h">What this audit is <em>not</em></h2>
+      <p class="dek">Three corrections to what a first-pass grep would have suggested.</p>
+      <ol>
+        <li>
+          <div>
+            The polling <code>Timer</code> in <code>startMonitoring</code> <strong>does</strong> use <code>[weak self]</code>. There is no retain cycle. Invalidating the timer in <code>deinit</code> is reasonable hygiene but not a fix for anything that bleeds.
+          </div>
+        </li>
+        <li>
+          <div>
+            <code>indexOfDuplicate</code> caches the <em>new</em> path's signature on first computation via <code>imageDuplicateSignatures[path]</code>. An earlier read of this code suggested the new-path signature was recomputed on every iteration; it isn't. The real problem with that dictionary is that it never shrinks — see <a href="#f02">§02</a>.
+          </div>
+        </li>
+        <li>
+          <div>
+            Recent commits (<code>75115e0</code> and <code>dd710da</code>) fixed the two freezes that motivated the recent releases. This audit is explicitly <strong>not</strong> about regressions. It's about the costs that remain after the regressions are already gone.
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- ========================================================
+         SETTLEMENT — priority phases
+         ======================================================== -->
+    <section class="settlement" aria-labelledby="settlement-h">
+      <div class="section-head">
+        <span class="marker">VI · Settlement</span>
+        <h2 id="settlement-h">Fix order, by return on effort</h2>
+        <span class="right-note">~6h total</span>
+      </div>
+
+      <div class="phase">
+        <div>
+          <div class="phase-num">Phase 1</div>
+          <span class="phase-meta">~1h · biggest win</span>
+        </div>
+        <div>
+          <div class="phase-title">Stop the bleeding.</div>
+          <div class="phase-desc">Both findings here get worse with uptime. Neither requires design — they're one-file edits with obvious diffs.</div>
+          <ul class="fixes">
+            <li><span class="no">§01</span> <a href="#f01">WAL + pragmas on SQLite</a> <span class="loc">ClipboardDatabase.swift:186</span></li>
+            <li><span class="no">§02</span> <a href="#f02">NSCache for image signatures</a> <span class="loc">ClipboardStore.swift:241</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div>
+          <div class="phase-num">Phase 2</div>
+          <span class="phase-meta">~2h · felt user wins</span>
+        </div>
+        <div>
+          <div class="phase-title">Smooth the hot paths.</div>
+          <div class="phase-desc">Three fixes that remove visible stutters from navigation, scroll, and bulk image paste.</div>
+          <ul class="fixes">
+            <li><span class="no">§03</span> <a href="#f03">O(1) selectedEntry via ID index</a> <span class="loc">SearchOverlayView.swift:48</span></li>
+            <li><span class="no">§06</span> <a href="#f06">Split the thumbnail cache lock</a> <span class="loc">ThumbnailCache.swift:14</span></li>
+            <li><span class="no">§10</span> <a href="#f10">Async persistImage</a> <span class="loc">ClipboardStore.swift:1006</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div>
+          <div class="phase-num">Phase 3</div>
+          <span class="phase-meta">~1–2h · shaping</span>
+        </div>
+        <div>
+          <div class="phase-title">Order the cheap before the expensive.</div>
+          <div class="phase-desc">Add the missing indexes, debounce the background index writes, trim the classifier, and skip redundant regrouping.</div>
+          <ul class="fixes">
+            <li><span class="no">§04</span> <a href="#f04">Indexes on kind + source_app</a> <span class="loc">ClipboardDatabase.swift:193</span></li>
+            <li><span class="no">§05</span> <a href="#f05">Debounce QMD writes</a> <span class="loc">QMDSearchEngine.swift</span></li>
+            <li><span class="no">§07</span> <a href="#f07">Gate URL() in classify</a> <span class="loc">ClipboardStore.swift:1022</span></li>
+            <li><span class="no">§09</span> <a href="#f09">Short-circuit groupedEntries rebuild</a> <span class="loc">SearchOverlayView.swift:423</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div>
+          <div class="phase-num">Phase 4</div>
+          <span class="phase-meta">~30m · hygiene</span>
+        </div>
+        <div>
+          <div class="phase-title">Leave the file better than you found it.</div>
+          <div class="phase-desc">Pick these up opportunistically — when you're already editing the relevant file for something else.</div>
+          <ul class="fixes">
+            <li><span class="no">§08</span> <a href="#f08">loadEntries transaction (may dissolve with §01)</a> <span class="loc">ClipboardDatabase.swift:25</span></li>
+            <li><span class="no">§11</span> <a href="#f11">Tokenize query once in fuzzy rank</a> <span class="loc">ClipboardSearch.swift</span></li>
+            <li><span class="no">§12</span> <a href="#f12">Shared PATHResolver utility</a> <span class="loc">QMD + ImageTitleGenerator</span></li>
+            <li><span class="no">§13</span> <a href="#f13">Cache metadata stats on details</a> <span class="loc">SearchOverlayView.swift:759</span></li>
+            <li><span class="no">§14</span> <a href="#f14">Trim buildSearchableText allocs</a> <span class="loc">ClipboardStore.swift:146</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         COLOPHON
+         ======================================================== -->
+    <footer class="colophon" role="contentinfo">
+      <div>
+        Typeset in <em>Fraunces</em>, <em>Source Serif 4</em>, and <em>JetBrains Mono</em>. Fourteen findings, four tiers, one clipboard.
+      </div>
+      <div class="end-mark">◆</div>
+    </footer>
+
+  </div>
+</body>
+</html>

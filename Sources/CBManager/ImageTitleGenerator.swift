@@ -130,42 +130,10 @@ actor ImageTitleGenerator {
     private func resolvePathIfNeeded() async {
         guard !pathResolved else { return }
         pathResolved = true
-        resolvedPiPath = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .background).async {
-                let shellPATH = Self.resolveShellPATH()
-                continuation.resume(returning: Self.findBinary(named: "pi", in: shellPATH))
-            }
-        }
-    }
-
-    private static func resolveShellPATH() -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: shell)
-        proc.arguments = ["-lc", "echo $PATH"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            if let resolved = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines), !resolved.isEmpty {
-                return resolved
-            }
-        } catch {}
-        return ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-    }
-
-    private static func findBinary(named name: String, in shellPATH: String) -> String? {
-        for dir in shellPATH.split(separator: ":").map(String.init) {
-            let candidate = "\(dir)/\(name)"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
+        resolvedPiPath = await ShellPathResolver.shared.findExecutable(
+            named: "pi",
+            mode: .login
+        )
     }
 }
 

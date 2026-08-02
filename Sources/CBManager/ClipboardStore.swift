@@ -152,9 +152,23 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
             ? String(content.prefix(searchContentLimit))
             : content
         let hints = computeSearchHints(kind: kind, content: content)
-        return [truncatedContent, ocrText, aiTitle, sourceApp ?? "", kind.rawValue, hints]
-            .joined(separator: " ")
-            .lowercased()
+        var searchable = String()
+        searchable.reserveCapacity(
+            truncatedContent.utf8.count + ocrText.utf8.count + aiTitle.utf8.count
+                + (sourceApp?.utf8.count ?? 0) + kind.rawValue.utf8.count + hints.utf8.count + 5
+        )
+        searchable.append(truncatedContent)
+        searchable.append(" ")
+        searchable.append(ocrText)
+        searchable.append(" ")
+        searchable.append(aiTitle)
+        searchable.append(" ")
+        searchable.append(sourceApp ?? "")
+        searchable.append(" ")
+        searchable.append(kind.rawValue)
+        searchable.append(" ")
+        searchable.append(hints)
+        return searchable.lowercased()
     }
 
     private static func buildTitleLine(
@@ -196,6 +210,18 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     }
 }
 
+private final class MonitoringActivity: @unchecked Sendable {
+    private let activity: NSObjectProtocol
+
+    init(options: ProcessInfo.ActivityOptions, reason: String) {
+        activity = ProcessInfo.processInfo.beginActivity(options: options, reason: reason)
+    }
+
+    deinit {
+        ProcessInfo.processInfo.endActivity(activity)
+    }
+}
+
 @MainActor
 final class ClipboardStore: ObservableObject {
     private static let duplicateImageSampleByteCount = 16 * 1024
@@ -219,7 +245,7 @@ final class ClipboardStore: ObservableObject {
                 recomputeFilteredEntries()
             } else {
                 scheduleQMDSearch()
-                scheduleFilterRecompute()
+                recomputeFilteredEntries()
             }
         }
     }
@@ -237,9 +263,15 @@ final class ClipboardStore: ObservableObject {
     @Published private(set) var isOverlayVisible = false
 
     private var timer: Timer?
+    private var monitoringActivity: MonitoringActivity?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var lastDeletionCleanupCheck = Date.distantPast
-    private var imageDuplicateSignatures: [String: ImageDuplicateSignature] = [:]
+    private let imageDuplicateSignatures: NSCache<NSString, ImageDuplicateSignatureBox> = {
+        let cache = NSCache<NSString, ImageDuplicateSignatureBox>()
+        cache.countLimit = 256
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
     private var nonImageDuplicateIndex: [TextDuplicateKey: String] = [:]
     private var filterRecomputeTask: Task<Void, Never>?
     private var filterRankingTask: Task<Void, Never>?
@@ -250,6 +282,8 @@ final class ClipboardStore: ObservableObject {
     private var qmdSemanticIDs: Set<String>?
     private var qmdResultQuery = ""
     private var qmdSearchGeneration: UInt = 0
+    private var filteredEntriesByID: [ClipboardEntry.ID: ClipboardEntry] = [:]
+    private var filteredEntryIndexesByID: [ClipboardEntry.ID: Int] = [:]
 
     private struct DeletedSnapshot {
         let entry: ClipboardEntry
@@ -263,6 +297,10 @@ final class ClipboardStore: ObservableObject {
 
     private let database: ClipboardDatabase
     private let imageDirectory: URL
+    private let imagePersistenceQueue = DispatchQueue(
+        label: "com.cbmanager.app.image-persistence",
+        qos: .utility
+    )
     private let qmdSearch: any ClipboardQMDSearching
     private let imageTitleGenerator = ImageTitleGenerator()
     private var imageTitlesEnabled = true
@@ -310,8 +348,8 @@ final class ClipboardStore: ObservableObject {
         }
     }
 
-    /// Debounced recompute — used by the query `didSet` so fast typing
-    /// doesn't block the main thread on every keystroke.
+    /// Debounced recompute — used by background metadata updates so they
+    /// don't thrash the list while OCR / AI titles land in quick succession.
     private func scheduleFilterRecompute() {
         filterRecomputeTask?.cancel()
         filterRecomputeTask = Task { @MainActor [weak self] in
@@ -350,10 +388,28 @@ final class ClipboardStore: ObservableObject {
 
             Task { @MainActor [weak self] in
                 guard let self, self.filterRankingGeneration == rankingGeneration else { return }
+                var entriesByID: [ClipboardEntry.ID: ClipboardEntry] = [:]
+                var indexesByID: [ClipboardEntry.ID: Int] = [:]
+                entriesByID.reserveCapacity(ranked.count)
+                indexesByID.reserveCapacity(ranked.count)
+                for (index, entry) in ranked.enumerated() {
+                    entriesByID[entry.id] = entry
+                    indexesByID[entry.id] = index
+                }
                 self.filteredEntries = ranked
+                self.filteredEntriesByID = entriesByID
+                self.filteredEntryIndexesByID = indexesByID
                 self.filteredEntriesVersion &+= 1
             }
         }
+    }
+
+    func filteredEntry(for id: ClipboardEntry.ID) -> ClipboardEntry? {
+        filteredEntriesByID[id]
+    }
+
+    func filteredEntryIndex(for id: ClipboardEntry.ID) -> Int? {
+        filteredEntryIndexesByID[id]
     }
 
     @discardableResult
@@ -554,6 +610,7 @@ final class ClipboardStore: ObservableObject {
 
     func overlayDidOpen(resetSearch: Bool = true) {
         isOverlayVisible = true
+        pollPasteboard()
         // Clear stale search state so the overlay opens instantly.
         // Skip reset when re-showing after preview dismiss.
         if resetSearch {
@@ -649,6 +706,11 @@ final class ClipboardStore: ObservableObject {
     }
 
     private func startMonitoring() {
+        monitoringActivity = MonitoringActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Monitor clipboard changes"
+        )
+
         let timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.handleMonitoringTick()
@@ -666,7 +728,6 @@ final class ClipboardStore: ObservableObject {
             lastDeletionCleanupCheck = .now
         }
 
-        guard !isOverlayVisible else { return }
         pollPasteboard()
     }
 
@@ -676,11 +737,15 @@ final class ClipboardStore: ObservableObject {
         lastChangeCount = pb.changeCount
 
         guard let newEntry = captureClipboardEntry(from: pb) else { return }
+        acceptCapturedEntry(newEntry)
+    }
+
+    private func acceptCapturedEntry(_ newEntry: ClipboardEntry) {
         if let existingIdx = indexOfDuplicate(newEntry) {
             // Already have this content — move to top instead of inserting.
             if let path = newEntry.imagePath {
                 ThumbnailCache.shared.evict(path: path)
-                imageDuplicateSignatures.removeValue(forKey: path)
+                imageDuplicateSignatures.removeObject(forKey: path as NSString)
                 try? FileManager.default.removeItem(atPath: path)
             }
             if existingIdx != 0 {
@@ -741,7 +806,7 @@ final class ClipboardStore: ObservableObject {
 
         expiredPaths.forEach { pendingImageDeletions.removeValue(forKey: $0) }
         for path in expiredPaths {
-            imageDuplicateSignatures.removeValue(forKey: path)
+            imageDuplicateSignatures.removeObject(forKey: path as NSString)
             ThumbnailCache.shared.evict(path: path)
         }
 
@@ -779,14 +844,19 @@ final class ClipboardStore: ObservableObject {
     }
 
     private func imageDuplicateSignature(at path: String) -> ImageDuplicateSignature? {
-        if let cached = imageDuplicateSignatures[path] {
-            return cached
+        let key = path as NSString
+        if let cached = imageDuplicateSignatures.object(forKey: key) {
+            return cached.value
         }
 
         guard let signature = Self.readImageDuplicateSignature(at: path) else {
             return nil
         }
-        imageDuplicateSignatures[path] = signature
+        imageDuplicateSignatures.setObject(
+            ImageDuplicateSignatureBox(signature),
+            forKey: key,
+            cost: signature.cacheCost
+        )
         return signature
     }
 
@@ -873,23 +943,49 @@ final class ClipboardStore: ObservableObject {
             )
         }
 
-        if let image = NSImage(pasteboard: pasteboard) {
+        if let pngData = pasteboard.data(forType: .png) {
             let entryID = UUID().uuidString
-            guard let imagePath = persistImage(image, id: entryID) else { return nil }
-
-            return ClipboardEntry(
-                id: entryID,
-                content: "",
-                date: .now,
-                sourceApp: sourceApp,
-                kind: .image,
-                fileURLs: [],
-                imagePath: imagePath,
-                ocrText: "",
-                isOCRPending: true,
-                aiTitle: "",
-                isAITitlePending: true
+            scheduleImageCapture(
+                data: pngData,
+                dataIsPNG: true,
+                entry: ClipboardEntry(
+                    id: entryID,
+                    content: "",
+                    date: .now,
+                    sourceApp: sourceApp,
+                    kind: .image,
+                    fileURLs: [],
+                    imagePath: imageDirectory.appendingPathComponent("\(entryID).png").path,
+                    ocrText: "",
+                    isOCRPending: true,
+                    aiTitle: "",
+                    isAITitlePending: true
+                )
             )
+            return nil
+        }
+
+        if let image = NSImage(pasteboard: pasteboard),
+           let tiffData = image.tiffRepresentation {
+            let entryID = UUID().uuidString
+            scheduleImageCapture(
+                data: tiffData,
+                dataIsPNG: false,
+                entry: ClipboardEntry(
+                    id: entryID,
+                    content: "",
+                    date: .now,
+                    sourceApp: sourceApp,
+                    kind: .image,
+                    fileURLs: [],
+                    imagePath: imageDirectory.appendingPathComponent("\(entryID).png").path,
+                    ocrText: "",
+                    isOCRPending: true,
+                    aiTitle: "",
+                    isAITitlePending: true
+                )
+            )
+            return nil
         }
 
         return nil
@@ -950,7 +1046,7 @@ final class ClipboardStore: ObservableObject {
             if let path = entry.imagePath {
                 try? FileManager.default.removeItem(atPath: path)
                 pendingImageDeletions.removeValue(forKey: path)
-                imageDuplicateSignatures.removeValue(forKey: path)
+                imageDuplicateSignatures.removeObject(forKey: path as NSString)
                 ThumbnailCache.shared.evict(path: path)
             }
             if isQMDAvailable {
@@ -1011,28 +1107,32 @@ final class ClipboardStore: ObservableObject {
         scheduleQMDSearchIfNeeded()
     }
 
-    private func persistImage(_ image: NSImage, id: String) -> String? {
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:]) else {
-            return nil
-        }
+    private func scheduleImageCapture(data: Data, dataIsPNG: Bool, entry: ClipboardEntry) {
+        guard let imagePath = entry.imagePath else { return }
+        let destination = URL(fileURLWithPath: imagePath)
 
-        let destination = imageDirectory.appendingPathComponent("\(id).png")
-        do {
-            try png.write(to: destination)
-            return destination.path
-        } catch {
-            return nil
+        imagePersistenceQueue.async { [weak self] in
+            let pngData: Data?
+            if dataIsPNG {
+                pngData = data
+            } else {
+                pngData = NSBitmapImageRep(data: data)?
+                    .representation(using: .png, properties: [:])
+            }
+
+            guard let pngData,
+                  (try? pngData.write(to: destination, options: .atomic)) != nil else {
+                return
+            }
+
+            Task { @MainActor [weak self] in
+                self?.acceptCapturedEntry(entry)
+            }
         }
     }
 
     private func classify(_ text: String) -> ClipboardEntry.Kind {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
-            return .link
-        }
 
         if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") {
             return .path
@@ -1043,6 +1143,14 @@ final class ClipboardStore: ObservableObject {
             return .code
         }
 
+        let lowercasedPrefix = trimmed.prefix(8).lowercased()
+        if (lowercasedPrefix.hasPrefix("http://") || lowercasedPrefix.hasPrefix("https://")),
+           let url = URL(string: trimmed),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return .link
+        }
+
         return .text
     }
 }
@@ -1051,4 +1159,16 @@ private struct ImageDuplicateSignature: Equatable {
     let fileSize: Int
     let headSample: Data
     let tailSample: Data
+
+    var cacheCost: Int {
+        MemoryLayout<Int>.size + headSample.count + tailSample.count
+    }
+}
+
+private final class ImageDuplicateSignatureBox: NSObject {
+    let value: ImageDuplicateSignature
+
+    init(_ value: ImageDuplicateSignature) {
+        self.value = value
+    }
 }
