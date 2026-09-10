@@ -11,7 +11,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         installMainMenu()
-        model = AppModel()
+        let model = AppModel()
+        self.model = model
+        LifecycleDiagnostics.start { [weak model] in
+            model?.store.entries.count ?? -1
+        }
+    }
+
+    /// AppKit runs this on ⌘Q, on "Quit" from the status bar menu, and on a
+    /// logout that the app is allowed to participate in. It does NOT run when
+    /// the process is killed, which is exactly the distinction we want on
+    /// record: a session with no exit reason was killed, not quit.
+    func applicationWillTerminate(_ notification: Notification) {
+        LifecycleDiagnostics.recordCleanExit(reason: "applicationWillTerminate")
     }
 
     /// Minimal main menu so standard key equivalents (⌘W, ⌘Q) work.

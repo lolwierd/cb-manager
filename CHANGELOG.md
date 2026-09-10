@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added lifecycle diagnostics so an unexplained disappearance can be diagnosed after the fact: a 30-second heartbeat records uptime, memory footprint, thread count, open file descriptors, and entry count to `lifecycle-state.json`, and the next launch reports whether the previous session exited cleanly or was killed. See `docs/diagnosing-disappearances.md`.
+
 ### Fixed
 
 - Fixed intermittent overlay no-shows by making panel presentation state explicit, unhiding and activating the accessory app before presentation, and recovering panels AppKit considered visible but WindowServer had removed from screen.
